@@ -395,7 +395,12 @@ Handles vertico and icomplete.  `ivy' is handled separately."
         (setq vertico--input t)
         (vertico--exhibit))
        ((bound-and-true-p icomplete-mode)
-        (fzfa--icomplete-exhibit))))))
+        (fzfa--icomplete-exhibit)))
+      ;; The refresh may have changed which candidate is selected without
+      ;; any command running, so `post-command-hook' will not fire: run the
+      ;; same debounced preview check it would have run.
+      (when fzfa--preview-schedule
+        (funcall fzfa--preview-schedule)))))
 
 (defun fzfa--frontend-push (ivy-push-fn)
   "Refresh the active completion display.
@@ -639,7 +644,6 @@ mutate the frontend's shared keymap.  No-op under `ivy-mode' (ivy uses
       (set-keymap-parent map (current-local-map))
       (define-key map (kbd fzfa-apply-key) #'fzfa-apply-current)
       (use-local-map map))))
-
 ;;; Live preview
 ;;
 ;; Categories declare per-action handlers in `fzfa-preview-functions'.
@@ -701,6 +705,15 @@ visible from :setup, :preview, :exit, and :return.  Use
   "Buffer-local debounce timer; lives in the minibuffer only.")
 (defvar-local fzfa--preview-last 'unset
   "Last previewed candidate in this minibuffer (for change detection).")
+(defvar-local fzfa--preview-schedule nil
+  "Debounced preview scheduler for this minibuffer, or nil.
+Set by `fzfa--preview-install' (same function it puts on
+`post-command-hook') and called from `fzfa--frontend-exhibit'.
+Selection changes caused by asynchronously streamed-in candidates run
+no command, so `post-command-hook' never fires for them; without this
+the initial selection is never previewed until the first keypress, and
+a preview rendered against a mid-stream candidate list goes stale when
+the final results reorder the candidates.")
 
 (defun fzfa-preview-get (key &optional default)
   "Return KEY from the active preview session's state plist, or DEFAULT."
@@ -771,39 +784,35 @@ immediately on every selection change."
                 (when-let* ((cand (fzfa--frontend-candidate)))
                   (unless (equal cand fzfa--preview-last)
                     (setq fzfa--preview-last cand)
-                    (fzfa--preview-call :preview cand))))))
+                    (fzfa--preview-call :preview cand)))))
+         (schedule
+          (if (<= delay 0)
+              run
+            (lambda ()
+              (unless (timerp fzfa--preview-timer)
+                (setq fzfa--preview-timer
+                      (run-with-idle-timer
+                       delay nil
+                       (lambda ()
+                         (when (timerp fzfa--preview-timer)
+                           (cancel-timer fzfa--preview-timer))
+                         (setq fzfa--preview-timer nil)
+                         (funcall run)))))))))
     (fzfa-preview-put :origin-window    (minibuffer-selected-window))
     (fzfa-preview-put :origin-buffer    (window-buffer
                                          (minibuffer-selected-window)))
     (fzfa-preview-put :default-directory default-directory)
     (setq fzfa--preview-last 'unset)
+    ;; Expose the scheduler so `fzfa--frontend-exhibit' can trigger the
+    ;; same debounced check when async results move the selection with no
+    ;; command running (see `fzfa--preview-schedule').
+    (setq fzfa--preview-schedule schedule)
     (fzfa--preview-call :setup)
-    (add-hook
-     'post-command-hook
-     (if (<= delay 0)
-         run
-       ;; The idle-timer callback fires with whatever buffer is current
-       ;; at fire time, not necessarily this minibuffer.  All state we
-       ;; touch (`fzfa--preview-timer', `fzfa--preview-last') is
-       ;; buffer-local here, so route the callback through MB or we
-       ;; silently corrupt the wrong buffer's locals and leave a stale
-       ;; timer object behind that blocks every subsequent preview.
-       (lambda ()
-         (unless (timerp fzfa--preview-timer)
-           (setq fzfa--preview-timer
-                 (run-with-idle-timer
-                  delay nil
-                  (lambda ()
-                    (when (buffer-live-p mb)
-                      (with-current-buffer mb
-                        (when (timerp fzfa--preview-timer)
-                          (cancel-timer fzfa--preview-timer))
-                        (setq fzfa--preview-timer nil)
-                        (funcall run)))))))))
-     nil t)
+    (add-hook 'post-command-hook schedule nil t)
     (add-hook
      'minibuffer-exit-hook
      (lambda ()
+       (setq fzfa--preview-schedule nil)
        (when (timerp fzfa--preview-timer)
          (cancel-timer fzfa--preview-timer)
          (setq fzfa--preview-timer nil))
