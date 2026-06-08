@@ -575,6 +575,133 @@ when the inner sources arrive without `:narrow'."
   ;; Well-formed candidate to a nonexistent path is a silent no-op.
   (fzfa--grep-preview "no-such-file.xyz:1:irrelevant"))
 
+(ert-deftest fzfa-grep-preview-highlights-line-and-candidate-matches ()
+  "Grep preview marks the target line and matched candidate spans."
+  (let ((tmpfile (make-temp-file "fzfa-grep-preview-test")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmpfile
+            (insert "one\nalpha msg beta\nthree\n"))
+          (let* ((cand (concat tmpfile ":2:alpha msg beta"))
+                 (content-start (progn
+                                  (string-match "\\`\\(.+?\\):\\([0-9]+\\):" cand)
+                                  (match-end 0)))
+                 (match-start (string-match "msg" cand content-start))
+                 (match-end (+ match-start 3))
+                 (fzfa--preview-session (list nil))
+                 (fzfa-after-preview-hook nil))
+            (add-text-properties match-start match-end
+                                 '(face completions-common-part)
+                                 cand)
+            (cl-letf (((symbol-function 'display-buffer)
+                       (lambda (buf _action)
+                         (set-window-buffer (selected-window) buf)
+                         (selected-window))))
+              (fzfa--grep-preview cand))
+            (let* ((overlays (fzfa-preview-get :grep-preview-overlays))
+                   (line-overlay (car overlays))
+                   (match-overlay (cadr overlays)))
+              (should (= (length overlays) 2))
+              (should (eq (overlay-get line-overlay 'category)
+                          'fzfa-preview-line-overlay))
+              (should (eq (overlay-get match-overlay 'category)
+                          'fzfa-preview-match-overlay))
+              (should (= (overlay-start match-overlay) 11))
+              (should (= (overlay-end match-overlay) 14))
+              (fzfa--grep-preview nil)
+              (should-not (fzfa-preview-get :grep-preview-overlays))
+              (should-not (overlay-buffer line-overlay))
+              (should-not (overlay-buffer match-overlay)))))
+      (when-let* ((buf (find-buffer-visiting tmpfile)))
+        (kill-buffer buf))
+      (delete-file tmpfile))))
+
+(ert-deftest fzfa-grep-preview-prefers-live-query-over-stale-candidate-faces ()
+  "Grep preview recomputes matches from the live query when possible."
+  (let ((tmpfile (make-temp-file "fzfa-grep-preview-test")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmpfile
+            (insert "one\nconsult--path-history\nthree\n"))
+          (let* ((cand (concat tmpfile ":2:consult--path-history"))
+                 (content-start (progn
+                                  (string-match "\\`\\(.+?\\):\\([0-9]+\\):" cand)
+                                  (match-end 0)))
+                 (stale-end (+ content-start 5))
+                 (fzfa--preview-session (list nil))
+                 (fzfa-after-preview-hook nil))
+            (add-text-properties content-start stale-end
+                                 '(face completions-common-part)
+                                 cand)
+            (cl-letf (((symbol-function 'fzfa--current-query)
+                       (lambda (&rest _) "consult"))
+                      ((symbol-function 'display-buffer)
+                       (lambda (buf _action)
+                         (set-window-buffer (selected-window) buf)
+                         (selected-window))))
+              (fzfa--grep-preview cand))
+            (let* ((overlays (fzfa-preview-get :grep-preview-overlays))
+                   (match-overlay (cadr overlays)))
+              (should (equal (with-current-buffer (overlay-buffer match-overlay)
+                               (buffer-substring-no-properties
+                                (overlay-start match-overlay)
+                                (overlay-end match-overlay)))
+                             "consult"))
+              (fzfa--grep-preview nil))))
+      (when-let* ((buf (find-buffer-visiting tmpfile)))
+        (kill-buffer buf))
+      (delete-file tmpfile))))
+
+(ert-deftest fzfa-grep-preview-uses-ivy-text-for-live-query ()
+  "Grep preview reads `ivy-text' when `ivy-mode' is active."
+  (let ((tmpfile (make-temp-file "fzfa-grep-preview-test")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmpfile
+            (insert "one\nconsult--path-history\nthree\n"))
+          (let* ((cand (concat tmpfile ":2:consult--path-history"))
+                 (content-start (progn
+                                  (string-match "\\`\\(.+?\\):\\([0-9]+\\):" cand)
+                                  (match-end 0)))
+                 (stale-end (+ content-start 5))
+                 (fzfa--preview-session (list nil))
+                 (fzfa-after-preview-hook nil))
+            (add-text-properties content-start stale-end
+                                 '(face completions-common-part)
+                                 cand)
+            (let ((had-ivy-mode (boundp 'ivy-mode))
+                  (old-ivy-mode (and (boundp 'ivy-mode)
+                                     (symbol-value 'ivy-mode)))
+                  (had-ivy-text (boundp 'ivy-text))
+                  (old-ivy-text (and (boundp 'ivy-text)
+                                     (symbol-value 'ivy-text))))
+              (unwind-protect
+                  (progn
+                    (set 'ivy-mode t)
+                    (set 'ivy-text "consult")
+                    (cl-letf (((symbol-function 'display-buffer)
+                               (lambda (buf _action)
+                                 (set-window-buffer (selected-window) buf)
+                                 (selected-window))))
+                      (fzfa--grep-preview cand)))
+                (if had-ivy-mode
+                    (set 'ivy-mode old-ivy-mode)
+                  (makunbound 'ivy-mode))
+                (if had-ivy-text
+                    (set 'ivy-text old-ivy-text)
+                  (makunbound 'ivy-text))))
+            (let* ((overlays (fzfa-preview-get :grep-preview-overlays))
+                   (match-overlay (cadr overlays)))
+              (should (equal (with-current-buffer (overlay-buffer match-overlay)
+                               (buffer-substring-no-properties
+                                (overlay-start match-overlay)
+                                (overlay-end match-overlay)))
+                             "consult"))
+              (fzfa--grep-preview nil))))
+      (when-let* ((buf (find-buffer-visiting tmpfile)))
+        (kill-buffer buf))
+      (delete-file tmpfile))))
+
 (ert-deftest fzfa-buffer-preview-handles-missing-buffer ()
   "Buffer preview is a silent no-op when the named buffer does not exist."
   (fzfa--buffer-preview nil)

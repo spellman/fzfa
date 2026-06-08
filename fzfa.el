@@ -48,6 +48,7 @@
 (defvar embark-default-action-overrides)
 (defvar embark-general-map)
 (defvar fzf-native-case-mode)
+(defvar fzf-native-batch-highlight)
 (defvar fzf-native-async-highlight)
 (defvar fzf-native-max-line-length)
 (defvar fzf-native-async-cache-size)
@@ -59,6 +60,7 @@
 (declare-function icomplete-exhibit "icomplete")
 (defvar icomplete-overlay)
 (defvar ivy-text)
+(defvar ivy-mode)
 (defvar ivy--index)
 (defvar ivy--all-candidates)
 (defvar ivy-count-format)
@@ -80,6 +82,7 @@
 (defvar marginalia-annotators)
 (declare-function fzf-native-score "fzf-native")
 (declare-function fzf-native-score-all "fzf-native")
+(declare-function fzf-native-ensure-loaded "fzf-native")
 (declare-function fzf-native-async-start "fzf-native")
 (declare-function fzf-native-async-stop "fzf-native")
 (declare-function fzf-native-async-generation "fzf-native")
@@ -455,6 +458,21 @@ fires this hook once the visit completes (point is at the destination)."
 Fires on every preview tick (point is at the previewed location in the
 origin window)."
   :type 'hook :group 'fzfa)
+
+(defface fzfa-preview-line
+  '((t :inherit region :extend t))
+  "Face used for previewed grep/location lines."
+  :group 'fzfa)
+
+(defface fzfa-preview-match
+  '((t :inherit isearch))
+  "Face used for previewed grep/location matches."
+  :group 'fzfa)
+
+(put 'fzfa-preview-line-overlay 'face 'fzfa-preview-line)
+(put 'fzfa-preview-line-overlay 'priority 1)
+(put 'fzfa-preview-match-overlay 'face 'fzfa-preview-match)
+(put 'fzfa-preview-match-overlay 'priority 2)
 
 (defmacro fzfa-with-visit (&rest body)
   "Run BODY as a visit action; fire `fzfa-after-visit-hook' on completion."
@@ -875,14 +893,106 @@ the preview here and the eventual selection action, avoiding the half-broken
           (run-hooks 'fzfa-after-preview-hook)))
       win)))
 
+(defun fzfa--preview-match-face-p (face)
+  "Return non-nil when FACE is an fzfa/fzf candidate match face."
+  (let ((faces (if (listp face) face (list face))))
+    (or (memq 'completions-common-part faces)
+        (memq 'completions-first-difference faces))))
+
+(defun fzfa--candidate-match-ranges (cand start)
+  "Return match ranges in CAND at or after START.
+Ranges are cons cells whose car/cdr are offsets relative to START."
+  (let ((pos start)
+        (end (length cand))
+        ranges)
+    (while (< pos end)
+      (let* ((next (or (next-single-property-change pos 'face cand end) end))
+             (face (get-text-property pos 'face cand)))
+        (when (fzfa--preview-match-face-p face)
+          (push (cons (- pos start) (- next start)) ranges))
+        (setq pos next)))
+    (nreverse ranges)))
+
+(defun fzfa--grep-preview-live-match-ranges (content)
+  "Return fzf match ranges for CONTENT against the live minibuffer query."
+  (let ((query (if (and (bound-and-true-p ivy-mode)
+                        (boundp 'ivy-text))
+                   ivy-text
+                 (fzfa--current-query ""))))
+    (when (and (not (fboundp 'fzf-native-score))
+               (fboundp 'fzf-native-ensure-loaded))
+      (fzf-native-ensure-loaded))
+    (when (and (not (string-empty-p query))
+               (fboundp 'fzf-native-score))
+      (let ((scored (copy-sequence content))
+            (fzf-native-batch-highlight t)
+            (fzf-native-case-mode fzfa-case-mode))
+        (when (> (car (fzf-native-score scored query)) 0)
+          (fzfa--candidate-match-ranges scored 0))))))
+
+(defun fzfa--grep-preview-match-ranges (cand content-start content)
+  "Return preview match ranges for grep CAND's CONTENT.
+Prefer the live minibuffer query because CAND may still carry match faces
+from a previous async scoring result during initial preview."
+  (or (fzfa--grep-preview-live-match-ranges content)
+      (fzfa--candidate-match-ranges cand content-start)))
+
+(defun fzfa--grep-preview-clear ()
+  "Delete overlays owned by the active grep preview session."
+  (when fzfa--preview-session
+    (mapc #'delete-overlay (fzfa-preview-get :grep-preview-overlays))
+    (fzfa-preview-put :grep-preview-overlays nil)))
+
+(defun fzfa--grep-preview-line-overlay (win line-start line-end)
+  "Return a line preview overlay for WIN around point.
+LINE-START and LINE-END bound the fallback logical line."
+  (if (and (window-live-p win)
+           (eq (window-buffer win) (current-buffer)))
+      (with-selected-window win
+        (save-excursion
+          (let ((visual-start (progn (vertical-motion 0) (point)))
+                (visual-end (progn (vertical-motion 1) (point))))
+            (make-overlay visual-start visual-end nil nil t))))
+    (make-overlay line-start
+                  (if (< line-end (point-max)) (1+ line-end) line-end)
+                  nil nil t)))
+
+(defun fzfa--grep-preview-overlays (buf win line-start line-end match-ranges)
+  "Install grep preview overlays in BUF for WIN.
+LINE-START and LINE-END bound the target line.  MATCH-RANGES are offsets
+relative to LINE-START."
+  (when fzfa--preview-session
+    (with-current-buffer buf
+      (let* ((line-overlay
+              (fzfa--grep-preview-line-overlay win line-start line-end))
+             (match-overlays
+              (delq
+               nil
+               (mapcar
+                (lambda (range)
+                  (let ((beg (min line-end (+ line-start (car range))))
+                        (end (min line-end (+ line-start (cdr range)))))
+                    (when (< beg end)
+                      (make-overlay beg end nil nil t))))
+                match-ranges)))
+             (overlays (cons line-overlay match-overlays)))
+        (overlay-put line-overlay 'category 'fzfa-preview-line-overlay)
+        (overlay-put line-overlay 'window win)
+        (dolist (overlay match-overlays)
+          (overlay-put overlay 'category 'fzfa-preview-match-overlay)
+          (overlay-put overlay 'window win))
+        (fzfa-preview-put :grep-preview-overlays overlays)))))
+
 (defun fzfa--grep-preview (cand)
   "Open the FILE from a FILE:LINE:CONTENT grep CAND at LINE for preview.
 Resolves FILE against the captured `default-directory' (the search root
 when invoked from `fzfa-async-completing-read')."
+  (fzfa--grep-preview-clear)
   (when (and cand
              (string-match "\\`\\(.+?\\):\\([0-9]+\\):" cand))
     (let* ((file (match-string 1 cand))
            (line (string-to-number (match-string 2 cand)))
+           (content-start (match-end 0))
            (path (expand-file-name file)))
       (when (file-readable-p path)
         (let ((buf (find-file-noselect path)))
@@ -890,8 +1000,22 @@ when invoked from `fzfa-async-completing-read')."
             (save-restriction
               (widen)
               (goto-char (point-min))
-              (forward-line (1- line))))
-          (fzfa-preview-show buf))))))
+              (forward-line (1- line))
+              (let* ((line-start (point))
+                     (line-end (line-end-position))
+                     (content (buffer-substring-no-properties
+                               line-start line-end))
+                     (match-ranges
+                      (fzfa--grep-preview-match-ranges
+                       cand content-start content))
+                     (first-match (caar match-ranges))
+                     (pos (if first-match
+                              (min line-end (+ line-start first-match))
+                            line-start))
+                     (win (fzfa-preview-show buf pos)))
+                (when (window-live-p win)
+                  (fzfa--grep-preview-overlays
+                   buf win line-start line-end match-ranges))))))))))
 
 (defun fzfa--location-preview (cand)
   "Preview SOURCE at LINE for an `fzfa-location' CAND.
