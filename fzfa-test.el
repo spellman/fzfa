@@ -190,7 +190,8 @@ surfaced via `fzfa--location-group' as the section header."
           (with-current-buffer buf
             (rename-buffer "fzfa-test-buf" t)
             (insert "hello\n"))
-          (cl-letf (((symbol-function 'buffer-list) (lambda () (list buf))))
+          (cl-letf (((symbol-function 'buffer-list)
+                     (lambda (&optional _frame) (list buf))))
             (let* ((args (fzfa-test--extract #'fzfa-swiper-all))
                    (cands (plist-get args :items))
                    (cand (car (cl-member "1:hello" cands :test #'equal))))
@@ -539,6 +540,31 @@ when the inner sources arrive without `:narrow'."
     ;; Stored nil differs from absent key (DEFAULT not applied).
     (fzfa-preview-put :a nil)
     (should (null (fzfa-preview-get :a :default)))))
+
+(ert-deftest fzfa-preview-schedule-restores-minibuffer-buffer ()
+  "Scheduled preview reads buffer-local state from the installing buffer."
+  (let ((source (generate-new-buffer " *fzfa-preview-source*"))
+        (other (generate-new-buffer " *fzfa-preview-other*"))
+        calls)
+    (unwind-protect
+        (cl-letf (((symbol-function 'minibuffer-selected-window)
+                   (lambda () (selected-window)))
+                  ((symbol-function 'fzfa--frontend-candidate)
+                   (lambda () "candidate"))
+                  ((symbol-function 'fzfa--preview-call)
+                   (lambda (action &rest _args)
+                     (push (list action (current-buffer)) calls))))
+          (with-current-buffer source
+            (let ((fzfa--preview-session (list '(:preview ignore)))
+                  (fzfa-preview-delay 0))
+              (fzfa--preview-install 0)
+              (let ((schedule fzfa--preview-schedule))
+                (with-current-buffer other
+                  (funcall schedule)))))
+          (should (equal (caar calls) :preview))
+          (should (eq (cadar calls) source)))
+      (kill-buffer source)
+      (kill-buffer other))))
 
 (ert-deftest fzfa-grep-preview-parses-candidate ()
   "Grep preview accepts FILE:LINE:CONTENT and ignores malformed input."
