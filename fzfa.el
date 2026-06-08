@@ -791,11 +791,14 @@ rather than reset; the callback re-reads the current candidate at fire
 time so reuse never previews a stale selection.  DELAY of 0 previews
 immediately on every selection change."
   (let* ((delay (or delay fzfa-preview-delay 0))
+         (preview-buffer (current-buffer))
          (run (lambda ()
-                (when-let* ((cand (fzfa--frontend-candidate)))
-                  (unless (equal cand fzfa--preview-last)
-                    (setq fzfa--preview-last cand)
-                    (fzfa--preview-call :preview cand)))))
+                (when (buffer-live-p preview-buffer)
+                  (with-current-buffer preview-buffer
+                    (when-let* ((cand (fzfa--frontend-candidate)))
+                      (unless (equal cand fzfa--preview-last)
+                        (setq fzfa--preview-last cand)
+                        (fzfa--preview-call :preview cand)))))))
          (schedule
           (if (<= delay 0)
               run
@@ -805,9 +808,11 @@ immediately on every selection change."
                       (run-with-idle-timer
                        delay nil
                        (lambda ()
-                         (when (timerp fzfa--preview-timer)
-                           (cancel-timer fzfa--preview-timer))
-                         (setq fzfa--preview-timer nil)
+                         (when (buffer-live-p preview-buffer)
+                           (with-current-buffer preview-buffer
+                             (when (timerp fzfa--preview-timer)
+                               (cancel-timer fzfa--preview-timer))
+                             (setq fzfa--preview-timer nil)))
                          (funcall run)))))))))
     (fzfa-preview-put :origin-window    (minibuffer-selected-window))
     (fzfa-preview-put :origin-buffer    (window-buffer
