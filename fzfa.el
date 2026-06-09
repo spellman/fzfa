@@ -165,6 +165,31 @@ run of matched bytes via fzf_get_positions."
                  (integer :tag "Top N candidates"))
   :group 'fzfa)
 
+(defface fzfa-match
+  '((((class color) (background light)) :foreground "#b00060" :weight bold)
+    (((class color) (background dark))  :foreground "#ff8fcf" :weight bold)
+    (t :weight bold))
+  "Face for fzf match highlights in the fzfa minibuffer.
+The C scorer faces matched runs with `completions-common-part' (see
+`fzfa-highlight'); some themes render that face with low contrast.  When
+`fzfa-match-highlight' is non-nil, fzfa remaps `completions-common-part'
+to this face inside its own minibuffer sessions — leaving the face
+untouched everywhere else — so matches stand out, as in `consult'.
+Customize this face to taste; set it to inherit `completions-common-part'
+to fall back to the theme's default."
+  :group 'fzfa)
+
+(defcustom fzfa-match-highlight t
+  "Whether to remap match highlighting in the fzfa minibuffer.
+When non-nil, fzfa buffer-locally remaps the `completions-common-part'
+face (the one the C scorer applies to matched runs) to `fzfa-match' for
+the duration of each fzfa minibuffer session, so matches are easier to
+see.  The remap is scoped to fzfa's own minibuffers; other completion
+UIs are unaffected.  Set to nil to display matches with the theme's
+`completions-common-part' face unchanged."
+  :type 'boolean
+  :group 'fzfa)
+
 (defcustom fzfa-max-line-length 256
   "Maximum character length of a candidate line.
 nil           — no limit.
@@ -1174,6 +1199,12 @@ the mini-window only for it to collapse on the next redisplay tick."
     (setq-local vertico-count-format nil))
   (when (boundp 'icomplete-matches-format)
     (setq-local icomplete-matches-format nil))
+  ;; Recolor the C scorer's match highlight to a higher-contrast face,
+  ;; scoped to this minibuffer.  `face-remap-add-relative' is buffer-local
+  ;; and the minibuffer buffer is discarded on exit, so no cleanup is
+  ;; needed and no other completion UI is affected.
+  (when fzfa-match-highlight
+    (face-remap-add-relative 'completions-common-part 'fzfa-match))
   (fzfa--minibuffer-install-apply-key)
   (when (bound-and-true-p icomplete-mode)
     ;; Empty-input state hits the zero-length-overlay resize blind spot:

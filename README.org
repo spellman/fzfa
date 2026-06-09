@@ -1094,6 +1094,7 @@ whatever your frontend already uses for this concept:
 | ~fzfa-directory~               |                    ~nil~ | Per-call directory override; supersedes project backend (see note below).     |
 | ~fzfa-project-backend~         |                ~project~ | How to resolve the root directory (see note below).                           |
 | ~fzfa-highlight~               |                      200 | C-side match highlighting; nil/t/N (see note below).                          |
+| ~fzfa-match-highlight~         |                      ~t~ | Remap the minibuffer match face to ~fzfa-match~ for contrast (see note).       |
 | ~fzfa-max-line-length~         |                      256 | Per-line character limit; nil/+N/-N (see note below).                         |
 | ~fzfa-cache-size~              |                       40 | Per-session LRU cache entries (see note below).                               |
 | ~fzfa-case-mode~               |                  ~smart~ | Case sensitivity: ~smart~ / ~ignore~ / ~respect~.                             |
@@ -1165,9 +1166,13 @@ Set ~fzfa-preview-highlight~ to ~nil~ to preview without the line/match
 overlays, or ~fzfa-preview-cursor~ to ~nil~ to leave the cursor alone.
 
 The minibuffer's own match highlighting is the C scorer's job (capped by
-~fzfa-highlight~) and uses the ~completions-common-part~ face; make it
-more prominent by customizing that face if your theme renders it
-subtly.
+~fzfa-highlight~), which faces matched runs with ~completions-common-part~.
+Because some themes render that face with low contrast, fzfa
+buffer-locally remaps it to the higher-contrast ~fzfa-match~ face for the
+duration of each of its own minibuffer sessions — other completion UIs
+are untouched.  Customize the ~fzfa-match~ face to change the look, set
+it to inherit ~completions-common-part~ to match your theme's default, or
+set ~fzfa-match-highlight~ to ~nil~ to disable the remap entirely.
 
 Categories whose candidates carry auxiliary state (e.g. an in-memory
 lookup hash table — ~fzfa-imenu~, ~fzfa-evil-mark~, ~fzfa-evil-jump~,
