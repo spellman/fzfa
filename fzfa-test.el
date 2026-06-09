@@ -540,6 +540,67 @@ when the inner sources arrive without `:narrow'."
     (fzfa-preview-put :a nil)
     (should (null (fzfa-preview-get :a :default)))))
 
+(ert-deftest fzfa-preview-refreshes-on-match-face-change ()
+  "Scheduled preview re-fires when only the candidate's match faces change.
+The line text stays the same as the query lengthens (\"emba\" → \"embark\"),
+but the `completions-common-part' run grows; the grep/location previews
+derive their highlight from that run, so a property-blind `equal' would
+freeze the overlay on the partial match.  The scheduler must compare with
+text properties and re-fire."
+  (let ((source (generate-new-buffer " *fzfa-preview-refresh*"))
+        (cands (list (propertize "x.el:1:embark" 'face nil)
+                     (propertize "x.el:1:embark" 'face nil)))
+        previews)
+    (unwind-protect
+        (cl-letf (((symbol-function 'minibuffer-selected-window)
+                   (lambda () (selected-window)))
+                  ((symbol-function 'fzfa--frontend-candidate)
+                   (lambda () (car cands)))
+                  ((symbol-function 'fzfa--preview-call)
+                   (lambda (action &rest args)
+                     (when (eq action :preview) (push (car args) previews)))))
+          (put-text-property 7 11 'face 'completions-common-part (nth 0 cands))
+          (put-text-property 7 13 'face 'completions-common-part (nth 1 cands))
+          (with-current-buffer source
+            (let ((fzfa--preview-session (list '(:preview ignore)))
+                  (fzfa-preview-delay 0))
+              (fzfa--preview-install 0)
+              (run-hooks 'post-command-hook)
+              (setq cands (cdr cands))
+              (run-hooks 'post-command-hook))))
+      (kill-buffer source))
+    (should (= 2 (length previews)))))
+
+(ert-deftest fzfa-preview-refreshes-on-in-place-match-change ()
+  "Scheduled preview re-fires when the SAME candidate is re-highlighted.
+The sync scorer (`fzf-native-score-all', behind `fzfa-swiper') mutates
+candidate strings in place and returns the same objects, so the scheduler
+must compare against a snapshot of the last candidate, not a live
+reference to it — otherwise it compares the object to its own mutated
+self and never refreshes."
+  (let* ((source (generate-new-buffer " *fzfa-preview-inplace*"))
+         (cand (propertize "x.el:1:embark" 'face nil))
+         previews)
+    (unwind-protect
+        (cl-letf (((symbol-function 'minibuffer-selected-window)
+                   (lambda () (selected-window)))
+                  ((symbol-function 'fzfa--frontend-candidate)
+                   (lambda () cand))
+                  ((symbol-function 'fzfa--preview-call)
+                   (lambda (action &rest _)
+                     (when (eq action :preview) (push t previews)))))
+          (put-text-property 7 11 'face 'completions-common-part cand)
+          (with-current-buffer source
+            (let ((fzfa--preview-session (list '(:preview ignore)))
+                  (fzfa-preview-delay 0))
+              (fzfa--preview-install 0)
+              (run-hooks 'post-command-hook)
+              (put-text-property 7 13 'face 'completions-common-part cand)
+              (run-hooks 'post-command-hook))))
+      (kill-buffer source))
+    (should (= 2 (length previews)))))
+
+
 (ert-deftest fzfa-grep-preview-parses-candidate ()
   "Grep preview accepts FILE:LINE:CONTENT and ignores malformed input."
   ;; No-op for nil / wrong shape — must not error.

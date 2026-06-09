@@ -847,8 +847,22 @@ immediately on every selection change."
          (mb (current-buffer))
          (run (lambda ()
                 (when-let* ((cand (fzfa--frontend-candidate)))
-                  (unless (equal cand fzfa--preview-last)
-                    (setq fzfa--preview-last cand)
+                  ;; Refresh when the candidate's match highlight changes,
+                  ;; not just its text.  The grep/location previews derive
+                  ;; their overlay from the candidate's own
+                  ;; `completions-common-part' faces, and those grow as the
+                  ;; query lengthens even while the selection stays on one
+                  ;; line (same text) — so a plain `equal' would freeze the
+                  ;; overlay on a partial match ("emba" of "embark").
+                  ;; Hence `equal-including-properties'.  And store a COPY:
+                  ;; the sync scorer (`fzf-native-score-all', used by
+                  ;; swiper) re-highlights candidates IN PLACE and hands
+                  ;; back the same string objects, so keeping a reference
+                  ;; would compare the object to its own mutated self and
+                  ;; never see the change.  A snapshot does.
+                  (unless (equal-including-properties
+                           cand fzfa--preview-last)
+                    (setq fzfa--preview-last (copy-sequence cand))
                     (fzfa--preview-call :preview cand))))))
     (fzfa-preview-put :origin-window    (minibuffer-selected-window))
     (fzfa-preview-put :origin-buffer    (window-buffer
