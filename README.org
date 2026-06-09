@@ -1132,6 +1132,7 @@ per-command code needed.  Built-in defaults:
 | ~fzfa-buffer~ | Show the buffer in a side window without stealing focus.                                |
 | ~fzfa-file~   | Open the file in a side window; kill on abort if not previously loaded (see note).      |
 | ~fzfa-grep~   | Parse ~FILE:LINE:CONTENT~, open FILE at LINE in a side window, highlighting the match.   |
+| ~fzfa-location~ | Open the in-Emacs SOURCE (file or buffer) carried on the candidate at LINE, highlighting the match. |
 
 For previews, ~fzfa-file~ tracks which buffers it newly created vs.
 which were already loaded.  On abort, only the newly-created ones
@@ -1144,13 +1145,16 @@ Files larger than ~fzfa-preview-file-size-limit~ (default 1 MiB)
 are skipped silently so that landing on a big binary doesn't stall
 selection movement.
 
-Grep-style previews (~fzfa-grep~ — used by ~fzfa-rg~, ~fzfa-ag~,
-~fzfa-grep~, ~fzfa-ugrep~, git/hg grep, …) highlight the match the way
-~consult-ripgrep~ does: a full-width ~fzfa-preview-line~ overlay marks
-the previewed line, ~fzfa-preview-match~ overlays mark the columns fzf
-scored against (read from the candidate's own ~completions-common-part~
-faces, so they line up with the highlights the minibuffer already
-shows), and point lands on the first match.  Because the preview window
+Line-oriented previews highlight the match the way ~consult-ripgrep~
+does.  This covers the ~fzfa-grep~ category (used by ~fzfa-rg~,
+~fzfa-ag~, ~fzfa-grep~, ~fzfa-ugrep~, git/hg grep, …) and the
+~fzfa-location~ category (in-Emacs line search — ~fzfa-swiper~,
+~fzfa-swiper-all~, ~fzfa-mark~, ~fzfa-global-mark~, ~fzfa-outline~): a
+full-width ~fzfa-preview-line~ overlay marks the previewed line,
+~fzfa-preview-match~ overlays mark the columns fzf scored against (read
+from the candidate's own ~completions-common-part~ faces, so they line
+up with the highlights the minibuffer already shows), and point lands on
+the first match.  Because the preview window
 is never the selected window, its cursor would otherwise render as a dim
 hollow box; ~fzfa-preview-cursor~ (default ~box~) is applied
 buffer-locally to ~cursor-in-non-selected-windows~ for the duration of

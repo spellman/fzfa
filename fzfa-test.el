@@ -604,13 +604,50 @@ and restores the buffer's cursor."
                     (should (memq 'fzfa-preview-match faces))))
                 ;; Reset tick: overlays gone, cursor restored to default.
                 (fzfa--grep-preview nil)
-                (should (null fzfa--grep-preview-overlays))
+                (should (null fzfa--preview-overlays))
                 (with-current-buffer buf
                   (should-not
                    (local-variable-p 'cursor-in-non-selected-windows))
                   (should (null (overlays-in (point-min) (point-max)))))
                 (kill-buffer buf)))))
       (delete-file tmpfile))))
+
+(ert-deftest fzfa-location-preview-draws-and-tears-down-overlays ()
+  "Location preview highlights the matched line of a LINE:CONTENT candidate.
+Match columns are mapped past the leading line-number prefix; a nil tick
+removes overlays and restores the buffer's cursor."
+  (let ((buf (generate-new-buffer "fzfa-location-preview-test")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'display-buffer) (lambda (&rest _) nil)))
+          (with-current-buffer buf
+            (insert "first line\nsecond :msg here\nthird line\n"))
+          (let* ((content "second :msg here")
+                 ;; Candidate displays "LINE:CONTENT"; the location is
+                 ;; carried on a text property, as `fzfa-swiper' builds it.
+                 (cand (fzfa--location-candidate
+                        (copy-sequence (concat "2:" content))
+                        (buffer-name buf) 2))
+                 (msg-col (string-search ":msg" content))
+                 (start (+ (length "2:") msg-col)))
+            ;; Highlight ":msg" on the candidate, as fzf would.
+            (put-text-property start (+ start 4)
+                               'face 'completions-common-part cand)
+            (fzfa--location-preview cand)
+            (with-current-buffer buf
+              ;; Point lands on the first matched column of line 2.
+              (should (= (point) (+ (line-beginning-position) msg-col)))
+              (should (eq cursor-in-non-selected-windows fzfa-preview-cursor))
+              (let ((faces (mapcar (lambda (ov) (overlay-get ov 'face))
+                                   (overlays-in (point-min) (point-max)))))
+                (should (memq 'fzfa-preview-line faces))
+                (should (memq 'fzfa-preview-match faces))))
+            ;; Reset tick: overlays gone, cursor restored.
+            (fzfa--location-preview nil)
+            (should (null fzfa--preview-overlays))
+            (with-current-buffer buf
+              (should-not (local-variable-p 'cursor-in-non-selected-windows))
+              (should (null (overlays-in (point-min) (point-max)))))))
+      (kill-buffer buf))))
 
 (ert-deftest fzfa-buffer-preview-handles-missing-buffer ()
   "Buffer preview is a silent no-op when the named buffer does not exist."
