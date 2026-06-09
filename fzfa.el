@@ -901,7 +901,16 @@ immediately on every selection change."
          (setq fzfa--preview-timer nil))
        (fzfa--preview-call :preview nil)
        (fzfa--preview-call :exit))
-     nil t)))
+     nil t)
+    ;; Preview the initial selection without waiting for the user's first
+    ;; command.  Async sessions get their first preview from
+    ;; `fzfa--frontend-exhibit' once results stream in, but sync candidates
+    ;; are ready immediately and would otherwise sit unpreviewed until the
+    ;; first move or keystroke — e.g. `fzfa-buffer' opens showing no
+    ;; preview at all.  Defer one idle tick so the frontend has computed its
+    ;; candidate list; `run' no-ops when there is no candidate yet (the
+    ;; async case, where the streamed-in results drive the first preview).
+    (run-with-idle-timer 0 nil run)))
 
 (defun fzfa--preview-return (cand)
   "Dispatch :return on the active session with CAND (nil = aborted).

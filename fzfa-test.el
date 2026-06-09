@@ -540,6 +540,30 @@ when the inner sources arrive without `:narrow'."
     (fzfa-preview-put :a nil)
     (should (null (fzfa-preview-get :a :default)))))
 
+(ert-deftest fzfa-preview-installs-initial-preview ()
+  "Install previews the initial selection without a first command.
+Sync commands like `fzfa-buffer' have their candidates ready on open;
+the initial preview is dispatched on a deferred idle tick rather than
+waiting for the user to move or type."
+  (let ((source (generate-new-buffer " *fzfa-preview-initial*"))
+        previews)
+    (unwind-protect
+        (cl-letf (((symbol-function 'minibuffer-selected-window)
+                   (lambda () (selected-window)))
+                  ((symbol-function 'fzfa--frontend-candidate)
+                   (lambda () "candidate"))
+                  ((symbol-function 'run-with-idle-timer)
+                   (lambda (_secs _repeat fn &rest args)
+                     (apply fn args) nil))
+                  ((symbol-function 'fzfa--preview-call)
+                   (lambda (action &rest args)
+                     (when (eq action :preview) (push (car args) previews)))))
+          (with-current-buffer source
+            (let ((fzfa--preview-session (list '(:preview ignore)))
+                  (fzfa-preview-delay 0))
+              (fzfa--preview-install 0))))
+      (kill-buffer source))
+    (should (equal previews '("candidate")))))
 (ert-deftest fzfa-preview-refreshes-on-match-face-change ()
   "Scheduled preview re-fires when only the candidate's match faces change.
 The line text stays the same as the query lengthens (\"emba\" → \"embark\"),
