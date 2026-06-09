@@ -657,6 +657,42 @@ mutate the frontend's shared keymap.  No-op under `ivy-mode' (ivy uses
 ;; state that :setup stashed even though the minibuffer is gone.
 ;; Only :preview is required.
 
+(defface fzfa-preview-line
+  '((t :inherit hl-line :extend t))
+  "Face for the matched line in a grep-style `fzfa' preview.
+Drawn as a full-width overlay over the previewed line, mirroring the
+line highlight `consult-ripgrep' shows."
+  :group 'fzfa)
+
+(defface fzfa-preview-match
+  '((t :inherit match))
+  "Face for the matched portions within a grep-style `fzfa' preview line.
+Applied to the same columns fzf scored the candidate against — the
+spans the minibuffer also highlights with `completions-common-part'."
+  :group 'fzfa)
+
+(defcustom fzfa-preview-highlight t
+  "Whether grep-style previews highlight the matched line and matches.
+When non-nil, `fzfa--grep-preview' draws a `fzfa-preview-line' overlay
+over the previewed line and `fzfa-preview-match' overlays over the
+matched columns.  Set to nil to preview with no added highlighting."
+  :type 'boolean
+  :group 'fzfa)
+
+(defcustom fzfa-preview-cursor 'box
+  "Cursor shown on the previewed line in grep-style previews.
+The preview window is never selected, so its cursor would otherwise
+render with the dim `cursor-in-non-selected-windows' style (a hollow
+box).  This value is applied buffer-locally to
+`cursor-in-non-selected-windows' for the duration of the preview so the
+matched line carries a solid cursor, mirroring `consult'.  Set to nil to
+leave the non-selected-window cursor untouched."
+  :type '(choice (const :tag "Leave default (hollow)" nil)
+                 (const :tag "Solid box" box)
+                 (const :tag "Bar" bar)
+                 (const :tag "Hollow box" hollow))
+  :group 'fzfa)
+
 (defcustom fzfa-preview-file-size-limit (* 1 1024 1024)
   "Maximum file size in bytes that `fzfa--file-preview' will open.
 Files larger than this are skipped (no preview) to keep selection
@@ -701,6 +737,19 @@ visible from :setup, :preview, :exit, and :return.  Use
   "Buffer-local debounce timer; lives in the minibuffer only.")
 (defvar-local fzfa--preview-last 'unset
   "Last previewed candidate in this minibuffer (for change detection).")
+
+(defvar fzfa--grep-preview-overlays nil
+  "Live overlays drawn by the most recent `fzfa--grep-preview' call.
+Previews run one at a time, so a single global list suffices: each
+call tears down the previous overlays before drawing its own, and
+minibuffer exit drives a final teardown via `fzfa--grep-preview' nil.")
+
+(defvar fzfa--grep-preview-cursor nil
+  "Cursor override recorded by the most recent grep preview, or nil.
+A cons (BUFFER . SAVED) where SAVED is BUFFER's prior buffer-local
+`cursor-in-non-selected-windows', or the symbol `fzfa--unset' when the
+variable was not buffer-local before the preview overrode it.  Read by
+`fzfa--grep-preview-reset' to restore the buffer's cursor.")
 
 (defun fzfa-preview-get (key &optional default)
   "Return KEY from the active preview session's state plist, or DEFAULT."
@@ -866,24 +915,127 @@ the preview here and the eventual selection action, avoiding the half-broken
           (run-hooks 'fzfa-after-preview-hook)))
       win)))
 
+(defun fzfa--grep-preview-reset ()
+  "Tear down overlays and the cursor override from the previous grep preview.
+Deletes every overlay in `fzfa--grep-preview-overlays' and restores the
+buffer's `cursor-in-non-selected-windows' recorded in
+`fzfa--grep-preview-cursor'.  Idempotent: safe to call when nothing is
+drawn (e.g. on the reset/exit `:preview' tick or in tests)."
+  (mapc #'delete-overlay fzfa--grep-preview-overlays)
+  (setq fzfa--grep-preview-overlays nil)
+  (when fzfa--grep-preview-cursor
+    (let ((buf   (car fzfa--grep-preview-cursor))
+          (saved (cdr fzfa--grep-preview-cursor)))
+      (when (buffer-live-p buf)
+        (with-current-buffer buf
+          (if (eq saved 'fzfa--unset)
+              (kill-local-variable 'cursor-in-non-selected-windows)
+            (setq-local cursor-in-non-selected-windows saved)))))
+    (setq fzfa--grep-preview-cursor nil)))
+
+(defun fzfa--common-part-face-p (face)
+  "Non-nil when FACE is, or includes, `completions-common-part'.
+FACE is the `face' text-property value off a candidate character: a
+single face symbol, a list of faces, or a property plist."
+  (cond
+   ((null face) nil)
+   ((eq face 'completions-common-part) t)
+   ((listp face) (memq 'completions-common-part face))
+   (t nil)))
+
+(defun fzfa--common-part-runs (cand content-start)
+  "Return CONTENT-relative (START . END) char ranges highlighted in CAND.
+Scans CAND from CONTENT-START to its end for maximal runs whose `face'
+text property includes `completions-common-part' — the match highlight
+fzf applied to the candidate (capped by `fzfa-highlight').  Each range is
+relative to CONTENT-START, i.e. a column span into the file line that the
+CAND's CONTENT field represents."
+  (let ((len (length cand))
+        (pos content-start)
+        (runs nil))
+    (while (< pos len)
+      (let ((next (or (next-single-property-change pos 'face cand len) len)))
+        (when (fzfa--common-part-face-p (get-text-property pos 'face cand))
+          (push (cons (- pos content-start) (- next content-start)) runs))
+        (setq pos next)))
+    (nreverse runs)))
+
+(defun fzfa--grep-preview-highlight (buf cand content-start line-beg line-end)
+  "Draw the line and match overlays for a grep preview in BUF.
+Adds a full-width `fzfa-preview-line' overlay over LINE-BEG..LINE-END and
+a `fzfa-preview-match' overlay over each matched column, mapping CAND's
+`completions-common-part' runs (offset by CONTENT-START) onto the line.
+Pushes every overlay onto `fzfa--grep-preview-overlays' for later
+teardown.  Returns the buffer position of the first match, or nil."
+  (let ((line-ov (make-overlay line-beg
+                               (min (1+ line-end) (point-max))
+                               buf)))
+    (overlay-put line-ov 'face 'fzfa-preview-line)
+    (overlay-put line-ov 'priority -50)
+    (push line-ov fzfa--grep-preview-overlays))
+  (let ((first nil))
+    (dolist (run (fzfa--common-part-runs cand content-start))
+      (let ((beg (min line-end (+ line-beg (car run))))
+            (end (min line-end (+ line-beg (cdr run)))))
+        (when (< beg end)
+          (let ((ov (make-overlay beg end buf)))
+            (overlay-put ov 'face 'fzfa-preview-match)
+            (overlay-put ov 'priority 100)
+            (push ov fzfa--grep-preview-overlays))
+          (unless first
+            (setq first beg)))))
+    first))
+
+(defun fzfa--grep-preview-set-cursor (buf)
+  "Give BUF a solid non-selected-window cursor for the preview.
+Records the prior `cursor-in-non-selected-windows' in
+`fzfa--grep-preview-cursor' so `fzfa--grep-preview-reset' can restore it,
+then sets it buffer-locally to `fzfa-preview-cursor'."
+  (with-current-buffer buf
+    (setq fzfa--grep-preview-cursor
+          (cons buf (if (local-variable-p 'cursor-in-non-selected-windows)
+                        cursor-in-non-selected-windows
+                      'fzfa--unset)))
+    (setq-local cursor-in-non-selected-windows fzfa-preview-cursor)))
+
 (defun fzfa--grep-preview (cand)
   "Open the FILE from a FILE:LINE:CONTENT grep CAND at LINE for preview.
 Resolves FILE against the captured `default-directory' (the search root
-when invoked from `fzfa-async-completing-read')."
+when invoked from `fzfa-async-completing-read').
+
+Highlights the matched line and matches, mirroring `consult-ripgrep':
+draws a `fzfa-preview-line' overlay over the line, `fzfa-preview-match'
+overlays over the columns fzf scored against (read from CAND's own
+`completions-common-part' faces, the same spans the minibuffer shows),
+gives the previewed line a solid cursor, and lands point on the first
+match.  Highlighting and the cursor are gated by `fzfa-preview-highlight'
+and `fzfa-preview-cursor'.  Passing nil tears the highlights down without
+opening anything (the reset/exit tick)."
+  (fzfa--grep-preview-reset)
   (when (and cand
              (string-match "\\`\\(.+?\\):\\([0-9]+\\):" cand))
     (let* ((file (match-string 1 cand))
            (line (string-to-number (match-string 2 cand)))
+           (content-start (match-end 0))
            (path (expand-file-name file)))
       (when (file-readable-p path)
-        (let ((buf (fzfa-with-quiet-find-file
-                     (find-file-noselect path 'nowarn))))
-          (with-current-buffer buf
-            (save-restriction
-              (widen)
-              (goto-char (point-min))
-              (forward-line (1- line))))
-          (fzfa-preview-show buf))))))
+        (let* ((buf (fzfa-with-quiet-find-file
+                      (find-file-noselect path 'nowarn)))
+               (pos (with-current-buffer buf
+                      (save-restriction
+                        (widen)
+                        (goto-char (point-min))
+                        (forward-line (1- line))
+                        (let ((line-beg (point))
+                              (line-end (line-end-position)))
+                          (or (when fzfa-preview-highlight
+                                (fzfa--grep-preview-highlight
+                                 buf cand content-start line-beg line-end))
+                              line-beg))))))
+          (when fzfa-preview-cursor
+            (fzfa--grep-preview-set-cursor buf))
+          (fzfa-preview-show buf pos))))))
+
 
 (defun fzfa--location-preview (cand)
   "Preview SOURCE at LINE for an `fzfa-location' CAND.

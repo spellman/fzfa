@@ -549,6 +549,69 @@ when the inner sources arrive without `:narrow'."
   ;; Well-formed candidate to a nonexistent path is a silent no-op.
   (fzfa--grep-preview "no-such-file.xyz:1:irrelevant"))
 
+(ert-deftest fzfa-common-part-face-p-recognizes-shapes ()
+  "`fzfa--common-part-face-p' accepts the symbol, a list, or a plist."
+  (should (fzfa--common-part-face-p 'completions-common-part))
+  (should (fzfa--common-part-face-p '(completions-common-part default)))
+  (should-not (fzfa--common-part-face-p nil))
+  (should-not (fzfa--common-part-face-p 'match))
+  (should-not (fzfa--common-part-face-p '(:foreground "red"))))
+
+(ert-deftest fzfa-common-part-runs-maps-to-content-columns ()
+  "`fzfa--common-part-runs' returns faced spans offset by CONTENT-START.
+The prefix \"f.clj:5:\" is 8 chars; a highlight on the candidate's
+\":msg\" at chars 8-12 becomes column range 0-4 into the file line."
+  (let ((cand (copy-sequence "f.clj:5::msg foo")))
+    ;;                         0123456789...   (":msg" at 8..12)
+    (put-text-property 8 12 'face 'completions-common-part cand)
+    (should (equal (fzfa--common-part-runs cand 8) '((0 . 4))))
+    ;; A candidate with no highlight yields no runs.
+    (should (null (fzfa--common-part-runs (copy-sequence "f.clj:5:plain") 8)))))
+
+(ert-deftest fzfa-grep-preview-draws-and-tears-down-overlays ()
+  "Grep preview draws line + match overlays and lands point on the match.
+A following nil tick (the reset/exit dispatch) removes every overlay
+and restores the buffer's cursor."
+  (let ((tmpfile (make-temp-file "fzfa-grep-preview-test" nil ".txt")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmpfile
+            (insert "first line\nsecond :msg here\nthird line\n"))
+          (cl-letf (((symbol-function 'display-buffer) (lambda (&rest _) nil)))
+            (let* ((content "second :msg here")
+                   (prefix (format "%s:2:" tmpfile))
+                   (cand (copy-sequence (concat prefix content)))
+                   (msg-col (string-search ":msg" content))
+                   (start (+ (length prefix) msg-col)))
+              ;; Highlight ":msg" on the candidate, as fzf would.
+              (put-text-property start (+ start 4)
+                                 'face 'completions-common-part cand)
+              (fzfa--grep-preview cand)
+              (let* ((buf (find-buffer-visiting tmpfile)))
+                (should buf)
+                (with-current-buffer buf
+                  ;; Point lands on the first matched column.
+                  (should (= (point)
+                             (+ (line-beginning-position) msg-col)))
+                  ;; Solid cursor applied buffer-locally.
+                  (should (eq cursor-in-non-selected-windows
+                              fzfa-preview-cursor))
+                  ;; A line overlay and a match overlay exist on line 2.
+                  (let ((faces (mapcar (lambda (ov) (overlay-get ov 'face))
+                                       (overlays-in (point-min)
+                                                    (point-max)))))
+                    (should (memq 'fzfa-preview-line faces))
+                    (should (memq 'fzfa-preview-match faces))))
+                ;; Reset tick: overlays gone, cursor restored to default.
+                (fzfa--grep-preview nil)
+                (should (null fzfa--grep-preview-overlays))
+                (with-current-buffer buf
+                  (should-not
+                   (local-variable-p 'cursor-in-non-selected-windows))
+                  (should (null (overlays-in (point-min) (point-max)))))
+                (kill-buffer buf)))))
+      (delete-file tmpfile))))
+
 (ert-deftest fzfa-buffer-preview-handles-missing-buffer ()
   "Buffer preview is a silent no-op when the named buffer does not exist."
   (fzfa--buffer-preview nil)
