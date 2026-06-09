@@ -655,16 +655,14 @@ removes overlays and restores the buffer's cursor."
   (fzfa--buffer-preview "*no-such-buffer*-fzfa-test*"))
 
 (ert-deftest fzfa-minibuffer-remaps-match-face-when-enabled ()
-  "Setup remaps `completions-common-part' to `fzfa-match' only when enabled.
+  "Setup recolors `completions-common-part' only when enabled.
 The remap is buffer-local, so each fzfa minibuffer recolors matches
 without touching the face anywhere else."
-  ;; Enabled: a relative remap to `fzfa-match' is installed.
+  ;; Enabled: a relative remap of `completions-common-part' is installed.
   (with-temp-buffer
     (let ((fzfa-match-highlight t))
       (fzfa--minibuffer-format-reset)
-      (should (member 'fzfa-match
-                      (alist-get 'completions-common-part
-                                 face-remapping-alist)))))
+      (should (assq 'completions-common-part face-remapping-alist))))
   ;; Disabled: no remap.
   (with-temp-buffer
     (let ((fzfa-match-highlight nil))

@@ -1168,11 +1168,16 @@ overlays, or ~fzfa-preview-cursor~ to ~nil~ to leave the cursor alone.
 The minibuffer's own match highlighting is the C scorer's job (capped by
 ~fzfa-highlight~), which faces matched runs with ~completions-common-part~.
 Because some themes render that face with low contrast, fzfa
-buffer-locally remaps it to the higher-contrast ~fzfa-match~ face for the
-duration of each of its own minibuffer sessions — other completion UIs
-are untouched.  Customize the ~fzfa-match~ face to change the look, set
-it to inherit ~completions-common-part~ to match your theme's default, or
-set ~fzfa-match-highlight~ to ~nil~ to disable the remap entirely.
+buffer-locally recolors matched runs for the duration of each of its own
+minibuffer sessions — other completion UIs are untouched.  It applies the
+foreground and weight of the ~fzfa-match~ face, which defaults to the same
+~match~ face the preview match overlay (~fzfa-preview-match~) inherits, so
+minibuffer and preview matches share the theme's match color.  Only the
+foreground and weight are applied — not the background — so a match shows
+as colored text rather than a filled block and the selection highlight
+shows through.  Customize the ~fzfa-match~ face to change the look, or set
+~fzfa-match-highlight~ to ~nil~ to leave ~completions-common-part~
+unchanged.
 
 Categories whose candidates carry auxiliary state (e.g. an in-memory
 lookup hash table — ~fzfa-imenu~, ~fzfa-evil-mark~, ~fzfa-evil-jump~,

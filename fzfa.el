@@ -166,27 +166,30 @@ run of matched bytes via fzf_get_positions."
   :group 'fzfa)
 
 (defface fzfa-match
-  '((((class color) (background light)) :foreground "#b00060" :weight bold)
-    (((class color) (background dark))  :foreground "#ff8fcf" :weight bold)
-    (t :weight bold))
-  "Face for fzf match highlights in the fzfa minibuffer.
+  '((t :inherit match))
+  "Face fzfa draws minibuffer matches in.
 The C scorer faces matched runs with `completions-common-part' (see
 `fzfa-highlight'); some themes render that face with low contrast.  When
-`fzfa-match-highlight' is non-nil, fzfa remaps `completions-common-part'
-to this face inside its own minibuffer sessions — leaving the face
+`fzfa-match-highlight' is non-nil, fzfa recolors matched runs to this
+face inside its own minibuffer sessions — leaving `completions-common-part'
 untouched everywhere else — so matches stand out, as in `consult'.
-Customize this face to taste; set it to inherit `completions-common-part'
-to fall back to the theme's default."
+
+Defaults to the same `match' face the preview match overlay
+\(`fzfa-preview-match') inherits, so minibuffer and preview matches share
+the theme's match color.  Only this face's foreground and weight are
+applied to a minibuffer match — its background is intentionally dropped,
+so a match shows as colored text rather than a filled block and the
+selection highlight shows through.  Customize it to taste."
   :group 'fzfa)
 
 (defcustom fzfa-match-highlight t
-  "Whether to remap match highlighting in the fzfa minibuffer.
+  "Whether to recolor match highlighting in the fzfa minibuffer.
 When non-nil, fzfa buffer-locally remaps the `completions-common-part'
-face (the one the C scorer applies to matched runs) to `fzfa-match' for
-the duration of each fzfa minibuffer session, so matches are easier to
-see.  The remap is scoped to fzfa's own minibuffers; other completion
-UIs are unaffected.  Set to nil to display matches with the theme's
-`completions-common-part' face unchanged."
+face (the one the C scorer applies to matched runs) to the foreground and
+weight of `fzfa-match' for the duration of each fzfa minibuffer session,
+so matches are easier to see.  The remap is scoped to fzfa's own
+minibuffers; other completion UIs are unaffected.  Set to nil to display
+matches with the theme's `completions-common-part' face unchanged."
   :type 'boolean
   :group 'fzfa)
 
@@ -1199,12 +1202,19 @@ the mini-window only for it to collapse on the next redisplay tick."
     (setq-local vertico-count-format nil))
   (when (boundp 'icomplete-matches-format)
     (setq-local icomplete-matches-format nil))
-  ;; Recolor the C scorer's match highlight to a higher-contrast face,
-  ;; scoped to this minibuffer.  `face-remap-add-relative' is buffer-local
-  ;; and the minibuffer buffer is discarded on exit, so no cleanup is
-  ;; needed and no other completion UI is affected.
+  ;; Recolor the C scorer's match highlight to a higher-contrast color,
+  ;; scoped to this minibuffer.  Apply only `fzfa-match's foreground and
+  ;; weight (resolved through inheritance, so it tracks the theme's `match'
+  ;; color) — not its background — so a match reads as colored text rather
+  ;; than a filled block and the selection highlight shows through.
+  ;; `face-remap-add-relative' is buffer-local and the minibuffer buffer is
+  ;; discarded on exit, so no cleanup is needed and no other completion UI
+  ;; is affected.
   (when fzfa-match-highlight
-    (face-remap-add-relative 'completions-common-part 'fzfa-match))
+    (face-remap-add-relative
+     'completions-common-part
+     :foreground (face-attribute 'fzfa-match :foreground nil t)
+     :weight     (face-attribute 'fzfa-match :weight nil t)))
   (fzfa--minibuffer-install-apply-key)
   (when (bound-and-true-p icomplete-mode)
     ;; Empty-input state hits the zero-length-overlay resize blind spot:
