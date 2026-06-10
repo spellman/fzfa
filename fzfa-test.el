@@ -771,16 +771,27 @@ removes overlays and restores the buffer's cursor."
   "Setup recolors `completions-common-part' only when enabled.
 The remap is buffer-local, so each fzfa minibuffer recolors matches
 without touching the face anywhere else."
-  ;; Enabled: a relative remap of `completions-common-part' is installed.
+  ;; t: fzfa--minibuffer-format-reset installs the remap.
   (with-temp-buffer
     (let ((fzfa-match-highlight t))
       (fzfa--minibuffer-format-reset)
       (should (assq 'completions-common-part face-remapping-alist))))
-  ;; Disabled: no remap.
+  ;; nil: no remap.
   (with-temp-buffer
     (let ((fzfa-match-highlight nil))
       (fzfa--minibuffer-format-reset)
+      (should-not (assq 'completions-common-part face-remapping-alist))))
+  ;; global: fzfa--minibuffer-format-reset does NOT remap (the hook does).
+  (with-temp-buffer
+    (let ((fzfa-match-highlight 'global))
+      (fzfa--minibuffer-format-reset)
       (should-not (assq 'completions-common-part face-remapping-alist)))))
+
+(ert-deftest fzfa-remap-match-face-installs-remap ()
+  "The shared remap function installs a `completions-common-part' remap."
+  (with-temp-buffer
+    (fzfa--remap-match-face)
+    (should (assq 'completions-common-part face-remapping-alist))))
 
 (ert-deftest fzfa-temporary-files-creates-and-kills ()
   "Opener creates an ephemeral buffer for a new file and kills it on cleanup."

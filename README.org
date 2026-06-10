@@ -109,15 +109,15 @@ algorithm.
 
 [[https://github.com/junegunn/fzf#search-syntax][fzf syntax]] is supported:
 
-| Token       | Match type                 | Description                          |
-|-------------+----------------------------+--------------------------------------|
-| ~sbtrkt~    | fuzzy-match                | Items that match ~sbtrkt~            |
-| ~'wild~     | exact-match (quoted)       | Items that include ~wild~            |
-| ~^music~    | prefix-exact-match         | Items that start with ~music~        |
-| ~.mp3$~     | suffix-exact-match         | Items that end with ~.mp3~           |
-| ~!fire~     | inverse-exact-match        | Items that do not include ~fire~     |
-| ~!^music~   | inverse-prefix-exact-match | Items that do not start with ~music~ |
-| ~!.mp3$~    | inverse-suffix-exact-match | Items that do not end with ~.mp3~    |
+| Token     | Match type                 | Description                          |
+|-----------+----------------------------+--------------------------------------|
+| ~sbtrkt~  | fuzzy-match                | Items that match ~sbtrkt~            |
+| ~'wild~   | exact-match (quoted)       | Items that include ~wild~            |
+| ~^music~  | prefix-exact-match         | Items that start with ~music~        |
+| ~.mp3$~   | suffix-exact-match         | Items that end with ~.mp3~           |
+| ~!fire~   | inverse-exact-match        | Items that do not include ~fire~     |
+| ~!^music~ | inverse-prefix-exact-match | Items that do not start with ~music~ |
+| ~!.mp3$~  | inverse-suffix-exact-match | Items that do not end with ~.mp3~    |
 
 A single bar character term acts as an OR operator.  For example,
 the following query matches entries that start with ~core~ and end
@@ -1080,27 +1080,27 @@ whatever your frontend already uses for this concept:
 | vertico / icomplete | ~C-M-m~ | ~fzfa-apply-key~ (configurable defcustom) |
 * Customization
 
-| Variable                       |                  Default | Description                                                                   |
-|--------------------------------+--------------------------+-------------------------------------------------------------------------------|
-| ~fzfa-max-candidates~          |                    10000 | Max candidates returned to Elisp (see note below).                            |
-| ~fzfa-refresh-delay~           |                     0.05 | Seconds between generation polls.                                             |
-| ~fzfa-input-debounce~          |                      0.1 | Idle seconds to retry after an interrupted scoring.                           |
-| ~fzfa-input-throttle~          |                      0.2 | Min seconds between UI refreshes driven by new data.                          |
-| ~fzfa-preview-delay~           |                      0.8 | Idle seconds before live-preview fires (nil = disabled; see note below).      |
-| ~fzfa-preview-functions~       |  (buffer, file, grep, …) | Category → preview handler plist (see note below).                            |
-| ~fzfa-preview-file-size-limit~ |                    1 MiB | Skip file preview when the file exceeds this size (nil/0 disables; see note). |
-| ~fzfa-preview-highlight~       |                      ~t~ | Highlight the matched line and matches in grep-style previews (see note).      |
-| ~fzfa-preview-cursor~          |                    ~box~ | Cursor on the previewed line in grep-style previews; nil leaves it (see note). |
-| ~fzfa-directory~               |                    ~nil~ | Per-call directory override; supersedes project backend (see note below).     |
-| ~fzfa-project-backend~         |                ~project~ | How to resolve the root directory (see note below).                           |
-| ~fzfa-highlight~               |                      200 | C-side match highlighting; nil/t/N (see note below).                          |
-| ~fzfa-match-highlight~         |                      ~t~ | Remap the minibuffer match face to ~fzfa-match~ for contrast (see note).       |
-| ~fzfa-max-line-length~         |                      256 | Per-line character limit; nil/+N/-N (see note below).                         |
-| ~fzfa-cache-size~              |                       40 | Per-session LRU cache entries (see note below).                               |
-| ~fzfa-case-mode~               |                  ~smart~ | Case sensitivity: ~smart~ / ~ignore~ / ~respect~.                             |
-| ~fzfa-fuzzy~                   |                      ~t~ | Fuzzy match (~t~) or exact/substring match (~nil~).                           |
-| ~fzfa-multi-narrow-key~        |                      ~<~ | Prefix key for narrowing in multi-source sessions; nil disables.              |
-| ~fzfa-extensions~              | (see *Extensions* below) | Extensions to ~require~ during setup.                                         |
+| Variable                       | Default                  | Description                                                                    |
+|--------------------------------+--------------------------+--------------------------------------------------------------------------------|
+| ~fzfa-max-candidates~          | 10000                    | Max candidates returned to Elisp (see note below).                             |
+| ~fzfa-refresh-delay~           | 0.05                     | Seconds between generation polls.                                              |
+| ~fzfa-input-debounce~          | 0.1                      | Idle seconds to retry after an interrupted scoring.                            |
+| ~fzfa-input-throttle~          | 0.2                      | Min seconds between UI refreshes driven by new data.                           |
+| ~fzfa-preview-delay~           | 0.8                      | Idle seconds before live-preview fires (nil = disabled; see note below).       |
+| ~fzfa-preview-functions~       | (buffer, file, grep, …)  | Category → preview handler plist (see note below).                             |
+| ~fzfa-preview-file-size-limit~ | 1 MiB                    | Skip file preview when the file exceeds this size (nil/0 disables; see note).  |
+| ~fzfa-preview-highlight~       | ~t~                      | Highlight the matched line and matches in grep-style previews (see note).      |
+| ~fzfa-preview-cursor~          | ~box~                    | Cursor on the previewed line in grep-style previews; nil leaves it (see note). |
+| ~fzfa-directory~               | ~nil~                    | Per-call directory override; supersedes project backend (see note below).      |
+| ~fzfa-project-backend~         | ~project~                | How to resolve the root directory (see note below).                            |
+| ~fzfa-highlight~               | 200                      | C-side match highlighting; nil/t/N (see note below).                           |
+| ~fzfa-match-highlight~         | ~global~                 | Remap the minibuffer match face to ~fzfa-match~ for contrast (see note).       |
+| ~fzfa-max-line-length~         | 256                      | Per-line character limit; nil/+N/-N (see note below).                          |
+| ~fzfa-cache-size~              | 40                       | Per-session LRU cache entries (see note below).                                |
+| ~fzfa-case-mode~               | ~smart~                  | Case sensitivity: ~smart~ / ~ignore~ / ~respect~.                              |
+| ~fzfa-fuzzy~                   | ~t~                      | Fuzzy match (~t~) or exact/substring match (~nil~).                            |
+| ~fzfa-multi-narrow-key~        | ~<~                      | Prefix key for narrowing in multi-source sessions; nil disables.               |
+| ~fzfa-extensions~              | (see *Extensions* below) | Extensions to ~require~ during setup.                                          |
 
 ~fzfa-preview-delay~ controls live preview for commands that act on the
 highlighted candidate as the selection moves (e.g. ~fzfa-theme~ loading
@@ -1128,11 +1128,11 @@ Only ~:preview~ is required.  Most commands wire up preview
 automatically by declaring a ~:category~ that's in this alist — no
 per-command code needed.  Built-in defaults:
 
-| Category      | Behavior                                                                                |
-|---------------+-----------------------------------------------------------------------------------------|
-| ~fzfa-buffer~ | Show the buffer in a side window without stealing focus.                                |
-| ~fzfa-file~   | Open the file in a side window; kill on abort if not previously loaded (see note).      |
-| ~fzfa-grep~   | Parse ~FILE:LINE:CONTENT~, open FILE at LINE in a side window, highlighting the match.   |
+| Category        | Behavior                                                                                            |
+|-----------------+-----------------------------------------------------------------------------------------------------|
+| ~fzfa-buffer~   | Show the buffer in a side window without stealing focus.                                            |
+| ~fzfa-file~     | Open the file in a side window; kill on abort if not previously loaded (see note).                  |
+| ~fzfa-grep~     | Parse ~FILE:LINE:CONTENT~, open FILE at LINE in a side window, highlighting the match.              |
 | ~fzfa-location~ | Open the in-Emacs SOURCE (file or buffer) carried on the candidate at LINE, highlighting the match. |
 
 For previews, ~fzfa-file~ tracks which buffers it newly created vs.
@@ -1167,17 +1167,18 @@ overlays, or ~fzfa-preview-cursor~ to ~nil~ to leave the cursor alone.
 
 The minibuffer's own match highlighting is the C scorer's job (capped by
 ~fzfa-highlight~), which faces matched runs with ~completions-common-part~.
-Because some themes render that face with low contrast, fzfa
-buffer-locally recolors matched runs for the duration of each of its own
-minibuffer sessions — other completion UIs are untouched.  It applies the
-foreground and weight of the ~fzfa-match~ face, which defaults to the same
-~match~ face the preview match overlay (~fzfa-preview-match~) inherits, so
-minibuffer and preview matches share the theme's match color.  Only the
+Because some themes render that face with low contrast, fzfa can
+buffer-locally recolor matched runs to the ~fzfa-match~ face.
+~fzfa-match-highlight~ controls the scope: ~global~ (the default) installs
+the recolor via ~minibuffer-setup-hook~ so every completion UI that applies
+~completions-common-part~ (fussy, orderless, flex, etc.) shows the same
+match color as fzfa; ~t~ limits the recolor to fzfa's own sessions; ~nil~
+leaves ~completions-common-part~ unchanged.  ~fzfa-match~ defaults to the
+same ~match~ face the preview match overlay (~fzfa-preview-match~) inherits,
+so minibuffer and preview matches share the theme's match color.  Only the
 foreground and weight are applied — not the background — so a match shows
 as colored text rather than a filled block and the selection highlight
-shows through.  Customize the ~fzfa-match~ face to change the look, or set
-~fzfa-match-highlight~ to ~nil~ to leave ~completions-common-part~
-unchanged.
+shows through.  Customize the ~fzfa-match~ face to change the look.
 
 Categories whose candidates carry auxiliary state (e.g. an in-memory
 lookup hash table — ~fzfa-imenu~, ~fzfa-evil-mark~, ~fzfa-evil-jump~,
@@ -1237,11 +1238,11 @@ enter the candidate pool.  Minified JavaScript, base64 payloads, and other
 pathologically long lines slow scoring and produce unreadable candidates.
 Lowering this number can be a huge performance improvement.
 
-| Value  | Behavior                                               |
-|--------+--------------------------------------------------------|
-| ~nil~  | No limit — every line is accepted unchanged.           |
-| ~+N~   | Exclude lines longer than N characters (default 256).  |
-| ~-N~   | Include but truncate to N characters.                  |
+| Value | Behavior                                              |
+|-------+-------------------------------------------------------|
+| ~nil~ | No limit — every line is accepted unchanged.          |
+| ~+N~  | Exclude lines longer than N characters (default 256). |
+| ~-N~  | Include but truncate to N characters.                 |
 
 The check fires in the reader thread immediately after ANSI stripping, before
 any allocation, so oversized lines never reach the scoring path.
@@ -1264,11 +1265,11 @@ Lowering this number can be a huge performance improvement.
 C module.  Each entry stores the top-K results and the full matched-
 candidate index for one query.  Three lookup outcomes:
 
-| Outcome     | When                                                | Effect                                          |
-|-------------+-----------------------------------------------------+-------------------------------------------------|
-| Exact-fresh | Same query, pool unchanged                          | Return cached results; no scoring scheduled.    |
-| Exact-stale | Same query, more candidates streamed in since       | Return cached top-K immediately, refine in BG.  |
-| Prefix      | New query is a refinement of a cached one           | Return prefix's top-K, refine on prior matches. |
+| Outcome     | When                                          | Effect                                          |
+|-------------+-----------------------------------------------+-------------------------------------------------|
+| Exact-fresh | Same query, pool unchanged                    | Return cached results; no scoring scheduled.    |
+| Exact-stale | Same query, more candidates streamed in since | Return cached top-K immediately, refine in BG.  |
+| Prefix      | New query is a refinement of a cached one     | Return prefix's top-K, refine on prior matches. |
 
 Refinement scoring scans only the prior match set + delta candidates
 instead of the full pool — for typing past the first 2-3 chars this
@@ -1309,10 +1310,10 @@ Read on every scoring call; changes take effect immediately.
 exact substrings.  Read at the start of every scoring
 call; ~let~-bind it dynamically to flip the matcher per-call.
 
-| Value | Behavior                                                                          |
-|-------+-----------------------------------------------------------------------------------|
-| ~t~   | Fuzzy matching (default).  Prefix a term with ~'~ to force exact match.           |
-| ~nil~ | Exact/substring matching.  Prefix a term with ~'~ to force fuzzy match.           |
+| Value | Behavior                                                                |
+|-------+-------------------------------------------------------------------------|
+| ~t~   | Fuzzy matching (default).  Prefix a term with ~'~ to force exact match. |
+| ~nil~ | Exact/substring matching.  Prefix a term with ~'~ to force fuzzy match. |
 
 Operator filters (~!~, ~^~, ~$~, ~|~, space-separated AND terms) work
 identically regardless of this setting — ~fzfa-fuzzy~ only changes the
