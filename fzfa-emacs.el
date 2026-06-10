@@ -58,7 +58,7 @@
   (recentf-mode 1)
   (unless recentf-list
     (user-error "No recent files"))
-  (when-let* ((result (fzfa-sync-completing-read :candidates recentf-list
+  (when-let* ((result (fzfa-sync-completing-read :candidates (copy-sequence recentf-list)
                                                 :prompt "recent: "
                                                 :category 'fzfa-file)))
     (fzfa-with-visit (find-file result))))
