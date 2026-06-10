@@ -190,7 +190,8 @@ surfaced via `fzfa--location-group' as the section header."
           (with-current-buffer buf
             (rename-buffer "fzfa-test-buf" t)
             (insert "hello\n"))
-          (cl-letf (((symbol-function 'buffer-list) (lambda () (list buf))))
+          (cl-letf (((symbol-function 'buffer-list)
+                     (lambda (&optional _frame) (list buf))))
             (let* ((args (fzfa-test--extract #'fzfa-swiper-all))
                    (cands (plist-get args :items))
                    (cand (car (cl-member "1:hello" cands :test #'equal))))
