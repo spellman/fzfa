@@ -45,6 +45,13 @@
 (declare-function project-switch-project "project")
 (defvar recentf-list)
 
+(defcustom fzfa-project-roots-dirs (list (expand-file-name "~/Projects/"))
+  "Directories whose immediate children are project roots.
+`fzfa-project-switch-project' lists depth-1 subdirectories of each
+entry instead of consulting `project-known-project-roots'."
+  :type '(repeat directory)
+  :group 'fzfa)
+
 (defun fzfa-project--current ()
   "Return the current project, or signal a user-error."
   (or (project-current)
@@ -142,18 +149,31 @@ current project's root."
 
 ;;;###autoload
 (defun fzfa-project-switch-project ()
-  "Switch to a known project root via fzf.
-After selection, dispatches through `project-switch-project' so the
-user's `project-switch-commands' menu kicks in."
+  "Switch to a project root via fzf.
+Candidates are the immediate subdirectories of each directory in
+`fzfa-project-roots-dirs'.  After selection, dispatches through
+`project-switch-project'."
   (interactive)
-  (let ((roots (project-known-project-roots)))
+  (let ((roots (fzfa-project--discover-roots)))
     (unless roots
-      (user-error "No known projects"))
+      (user-error "No projects found under %s"
+                  (mapconcat #'abbreviate-file-name
+                             fzfa-project-roots-dirs ", ")))
     (when-let* ((sel (fzfa-sync-completing-read
                       :candidates (mapcar #'abbreviate-file-name roots)
                       :prompt "switch project: "
                       :category 'fzfa-file)))
       (project-switch-project (expand-file-name sel)))))
+
+(defun fzfa-project--discover-roots ()
+  "Return depth-1 subdirectories of each dir in `fzfa-project-roots-dirs'."
+  (cl-loop for parent in fzfa-project-roots-dirs
+           when (file-directory-p parent)
+           nconc (cl-loop for entry in (directory-files parent t)
+                          when (and (file-directory-p entry)
+                                    (not (member (file-name-nondirectory entry)
+                                                 '("." ".."))))
+                          collect (file-name-as-directory entry))))
 
 (provide 'fzfa-project)
 ;;; fzfa-project.el ends here
