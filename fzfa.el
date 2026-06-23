@@ -50,6 +50,7 @@
 (defvar fzf-native-case-mode)
 (defvar fzf-native-fuzzy)
 (defvar fzf-native-async-highlight)
+(defvar fzf-native-batch-highlight)
 (defvar fzf-native-max-line-length)
 (defvar fzf-native-async-cache-size)
 (defvar marginalia-annotate-file)
@@ -81,6 +82,7 @@
 (defvar marginalia-annotators)
 (declare-function fzf-native-score "fzf-native")
 (declare-function fzf-native-score-all "fzf-native")
+(declare-function fzf-native-highlight-all "fzf-native")
 (declare-function fzf-native-async-start "fzf-native")
 (declare-function fzf-native-async-stop "fzf-native")
 (declare-function fzf-native-async-generation "fzf-native")
@@ -2269,6 +2271,24 @@ PATH and whose command symbol is bound: %s."
 
 ;;; Sync `completing-read'
 
+(defun fzfa--clear-match-highlights (candidates)
+  "Strip `completions-common-part' match faces from CANDIDATES, in place.
+The sync completion table skips `fzf-native-score-all' on an empty query
+\(there is nothing to match), so the match faces a prior non-empty query
+applied to the reused candidate strings would otherwise persist — when the
+user backspaces all the way back to an empty query, swiper would still show
+the last query's highlights.  `fzf-native-score-all' clears them itself on
+an empty query, but only for the top-N it would have highlighted and in the
+order it was handed; the sync table returns candidates in their original
+\(e.g. buffer) order, so a capped clear misses matches that sit past the
+cap.  Bind the cap to t for an uncapped clear-only pass over every
+candidate.  Runs only on the non-empty -> empty transition, so the cost is
+paid once on backspace-to-empty, never on the initial open."
+  (when candidates
+    (let ((fzf-native-batch-highlight t))
+      (fzf-native-highlight-all candidates "")))
+  candidates)
+
 (cl-defun fzfa-sync-completing-read (&key
                                      candidates
                                      (prompt "fzf > ")
@@ -2347,6 +2367,10 @@ PATH and whose command symbol is bound: %s."
          ;; branch.  Vertico/icomplete reach this via the metadata, so
          ;; gating on `ivy-mode' avoids a double sort there.
          (ivy-history-sort-p (and history (bound-and-true-p ivy-mode)))
+         ;; Track whether the live query has applied match highlighting, so
+         ;; the empty-query branch only runs the clear-only pass after a
+         ;; non-empty query (never on the initial, already-clean open).
+         (highlighted nil)
          (selection nil))
     (unwind-protect
         (minibuffer-with-setup-hook
@@ -2367,11 +2391,16 @@ PATH and whose command symbol is bound: %s."
                      ('t (let ((query (fzfa--current-query str)))
                            (cond
                             ((not (string-empty-p query))
+                             (setq highlighted t)
                              (fzfa--bridge-defcustoms
                               #'fzf-native-score-all candidates query))
-                            (ivy-history-sort-p
-                             (fzfa--history-rank candidates history))
-                            (t candidates))))))
+                            (t
+                             (when highlighted
+                               (setq highlighted nil)
+                               (fzfa--clear-match-highlights candidates))
+                             (if ivy-history-sort-p
+                                 (fzfa--history-rank candidates history)
+                               candidates)))))))
                  nil require-match nil history default)))
       (when handler (fzfa--preview-return selection)))
     selection))
@@ -3493,7 +3522,16 @@ render."
 
 (defun fzfa--bridge-defcustoms (orig-fn &rest args)
   "Wrap fzf-native call ORIG-FN with ARGS; bridge fzfa-* into C scorer."
+  ;; `fzfa-highlight' controls both scoring paths.  The async candidate
+  ;; reader (`fzf-native-async-candidates') reads the cap from
+  ;; `fzf-native-async-highlight'; the sync scorer (`fzf-native-score-all',
+  ;; used by `fzfa-swiper' and the other single-pass commands) reads it from
+  ;; `fzf-native-batch-highlight'.  Bind both so the sync path doesn't fall
+  ;; back to fzf-native's small batch default (25) — at that cap a buffer
+  ;; with more matches than the cap leaves candidates outside the top-N
+  ;; carrying stale match faces from earlier, shorter queries.
   (let ((fzf-native-async-highlight  fzfa-highlight)
+        (fzf-native-batch-highlight  fzfa-highlight)
         (fzf-native-max-line-length  fzfa-max-line-length)
         (fzf-native-async-cache-size fzfa-cache-size)
         (fzf-native-case-mode        fzfa-case-mode)
