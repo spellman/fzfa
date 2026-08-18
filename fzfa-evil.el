@@ -4,6 +4,7 @@
 
 ;; Author: James Nguyen <james@jojojames.com>
 ;; Version: 1.0
+;; Package-Requires: ((emacs "29.1"))
 ;; Homepage: https://github.com/jojojames/fzfa
 ;; Assisted-by: Claude:claude-opus-4-7
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -32,16 +33,15 @@
 (declare-function evil-get-marker "evil-common"
                   (char &optional raw))
 (declare-function evil-goto-mark "evil-commands"
-                  (char &optional noerror))
+                  (char &optional noerror) t)
 (declare-function evil-register-list          "evil-common")
 (declare-function evil-paste-from-register    "evil-commands" (register))
-(declare-function evil-execute-macro          "evil-macros" (count macro))
+(declare-function evil-execute-macro          "evil-macros" (count macro) t)
 (declare-function ring-elements                    "ring" (ring))
 (declare-function evil--jumps-get-window-jump-list "evil-jumps")
 (declare-function evil-ex-execute             "evil-ex" (string))
 (declare-function evil-ex-make-search-pattern "evil-search" (regexp))
-(declare-function evil-ex-search-next         "evil-commands" (&optional count))
-(defvar evil-markers-alist)
+(declare-function evil-ex-search-next         "evil-commands" (&optional count) t)
 (defvar evil-ex-history)
 (defvar evil-ex-search-history)
 (defvar evil-ex-search-pattern)
@@ -57,6 +57,7 @@
 
 (defun fzfa-evil--mark-location (val)
   "Return a \"BUFFER:LINE: CONTENT\" string describing evil mark value VAL.
+
 VAL is whatever `evil-get-marker' returns: a marker, an integer
 position in the current buffer, or a (FILE . POS) cons for an
 unloaded global mark.  Returns nil when VAL is unrecognized."
@@ -78,7 +79,7 @@ unloaded global mark.  Returns nil when VAL is unrecognized."
       (format "%s:%s" (car val) (cdr val))))))
 
 (defun fzfa-evil--mark-entries ()
-  "Return alist of (CHAR-STR . LOCATION) for evil marks that are set."
+  "Return alist of (CHAR-STR . LOCATION) for evil mark that are set."
   (let (out)
     (cl-flet ((collect
                 (char)
@@ -92,7 +93,8 @@ unloaded global mark.  Returns nil when VAL is unrecognized."
 
 ;;;###autoload
 (defun fzfa-evil-marks ()
-  "Jump to an evil mark, fuzzy-selected from the set of evil marks.
+  "Jump to an evil mark, fuzzy-selected from the set of evil mark.
+
 The candidate string includes the mark's location and line content
 so fzf scores against the preview too — type a snippet of the line
 to filter."
@@ -113,7 +115,7 @@ to filter."
                         (puthash display char map)
                         display))
                     entries)))
-      (when-let* ((sel (fzfa-sync-completing-read
+      (when-let* ((sel (fzfa-completing-read
                         :candidates cands
                         :prompt "evil mark: "
                         :category 'fzfa-evil-mark
@@ -150,6 +152,7 @@ to filter."
 ;;;###autoload
 (defun fzfa-evil-registers ()
   "Fuzzy-select an evil register; paste text or execute a macro.
+
 Vector / string-of-key-events values are executed as keyboard macros;
 other values are inserted via `evil-paste-from-register'."
   (interactive)
@@ -168,7 +171,7 @@ other values are inserted via `evil-paste-from-register'."
                        (concat "  "
                                (propertize (cdr (gethash cand map))
                                            'face 'completions-annotations))))
-           (sel (fzfa-sync-completing-read
+           (sel (fzfa-completing-read
                  :candidates cands
                  :prompt "evil register: "
                  :category 'fzfa-evil-register
@@ -182,6 +185,7 @@ other values are inserted via `evil-paste-from-register'."
 
 (defun fzfa-evil--jump-format (entry)
   "Return (DISPLAY . ACTION-PLIST) for jump-list ENTRY, or nil to skip.
+
 ENTRY is `(MARK FILE-NAME)' as stored in `evil--jumps-get-window-jump-list'.
 MARK is a marker for in-session jumps and an integer for savehist-restored
 jumps.  DISPLAY includes the line content (when the buffer is loaded) so
@@ -229,7 +233,7 @@ the fzf scorer can match against the preview text."
                    and collect (car formatted))))
     (unless cands
       (user-error "Evil jump list is empty"))
-    (when-let* ((sel (fzfa-sync-completing-read
+    (when-let* ((sel (fzfa-completing-read
                       :candidates cands
                       :prompt "evil jump: "
                       :category 'fzfa-evil-jump
@@ -258,7 +262,7 @@ the fzf scorer can match against the preview text."
   (require 'evil)
   (unless evil-ex-history
     (user-error "Evil ex history is empty"))
-  (when-let* ((sel (fzfa-sync-completing-read
+  (when-let* ((sel (fzfa-completing-read
                     :candidates (delete-dups (copy-sequence evil-ex-history))
                     :prompt ": "
                     :category 'fzfa-evil-ex-history)))
@@ -279,7 +283,7 @@ the fzf scorer can match against the preview text."
   (require 'evil)
   (unless evil-ex-search-history
     (user-error "Evil search history is empty"))
-  (when-let* ((sel (fzfa-sync-completing-read
+  (when-let* ((sel (fzfa-completing-read
                     :candidates (delete-dups
                                  (copy-sequence evil-ex-search-history))
                     :prompt "/"
@@ -289,6 +293,7 @@ the fzf scorer can match against the preview text."
 ;;;###autoload
 (defun fzfa-evil-command-window ()
   "Fuzzy-select from unified ex + search history.
+
 Ex commands display with a `:' prefix, search patterns with `/'.
 The prefix is stripped before dispatching to `evil-ex-execute' or
 the evil search."
@@ -308,7 +313,7 @@ the evil search."
                       (?/ "Search"))))))
     (unless cands
       (user-error "No evil ex or search history"))
-    (when-let* ((sel (fzfa-sync-completing-read
+    (when-let* ((sel (fzfa-completing-read
                       :candidates cands
                       :prompt "evil: "
                       :category 'fzfa-evil-command-window

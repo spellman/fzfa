@@ -4,6 +4,7 @@
 
 ;; Author: James Nguyen <james@jojojames.com>
 ;; Version: 1.0
+;; Package-Requires: ((emacs "29.1"))
 ;; Homepage: https://github.com/jojojames/fzfa
 ;; Assisted-by: Claude:claude-opus-4-7
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -26,12 +27,14 @@
 
 (defcustom fzfa-grep-command "grep -Rn ''"
   "Shell command used by `fzfa-grep' for content search.
+
 Output must be FILE:LINE:CONTENT."
   :type 'string
   :group 'fzfa)
 
 (defcustom fzfa-grep-current-file-command "grep -vnH '^[[:space:]]*$' %s"
   "Shell command used by `fzfa-grep-current-file'.
+
 A `%s' placeholder is filled with the shell-quoted current file path.
 Output must be FILE:LINE:CONTENT."
   :type 'string
@@ -40,31 +43,33 @@ Output must be FILE:LINE:CONTENT."
 ;;;###autoload
 (defun fzfa-grep ()
   "Search file contents under `default-directory' with grep.
+
 Streams all file contents as FILE:LINE:CONTENT; type
  to fuzzy-filter across them.
 Selecting a candidate opens the file at that line.
 The command is configurable via `fzfa-grep-command'."
   (interactive)
-  (when-let* ((r (fzfa-async-completing-read
+  (when-let* ((r (fzfa-completing-read
                   :command fzfa-grep-command
                   :category 'fzfa-grep
                   :group #'fzfa--grep-group)))
-    (fzfa-with-visit (fzfa--grep-jump r))))
+    (fzfa-visit-grep r)))
 
 ;;;###autoload
 (defun fzfa-grep-current-file ()
   "Search the current buffer's file with grep.
+
 Streams non-blank lines as FILE:LINE:CONTENT; type to fuzzy-filter across them.
 Selecting a candidate jumps to that line in the file.
 The command is configurable via `fzfa-grep-current-file-command'."
   (interactive)
   (unless buffer-file-name
     (user-error "Buffer is not visiting a file"))
-  (when-let* ((r (fzfa-async-completing-read
+  (when-let* ((r (fzfa-completing-read
                   :command (format fzfa-grep-current-file-command
                                    (shell-quote-argument buffer-file-name))
                   :category 'fzfa-grep)))
-    (fzfa-with-visit (fzfa--grep-jump r))))
+    (fzfa-visit-grep r)))
 
 (provide 'fzfa-grep)
 ;;; fzfa-grep.el ends here

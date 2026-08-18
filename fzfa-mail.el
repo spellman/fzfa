@@ -4,6 +4,7 @@
 
 ;; Author: James Nguyen <james@jojojames.com>
 ;; Version: 1.0
+;; Package-Requires: ((emacs "29.1"))
 ;; Homepage: https://github.com/jojojames/fzfa
 ;; Assisted-by: Claude:claude-opus-4-7
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -19,7 +20,7 @@
 ;;
 ;; Strategy: Bulk-fetch every inbox message's date/sender/subject and
 ;; message-id via JXA into one cached list, present via
-;; `fzfa-sync-completing-read', open the selection in Mail.app by
+;; `fzfa-completing-read', open the selection in Mail.app by
 ;; `message id'.  The initial dump is slow for large inboxes (10–30s
 ;; depending on size), so it is cached for the session.  Run
 ;; `fzfa-mail-refresh' after new mail arrives.
@@ -35,12 +36,14 @@
 
 (defcustom fzfa-mail-dump-timeout 120
   "Seconds to wait for the Mail.app dump before giving up.
+
 Large inboxes (10k+ messages) can take 30s+ to enumerate."
   :type 'number
   :group 'fzfa)
 
 (defconst fzfa-mail--dump-script
   "var Mail = Application('Mail');
+
    var msgs = Mail.inbox.messages;
    var ids = msgs.messageId();
    var dates = msgs.dateReceived();
@@ -57,6 +60,7 @@ Large inboxes (10k+ messages) can take 30s+ to enumerate."
 
 (defvar fzfa-mail--cache nil
   "Cached messages.
+
 Each entry is a plist with `:id', `:date', `:from', and `:subject' keys.")
 
 (defun fzfa-mail--osascript-lines (script)
@@ -111,7 +115,7 @@ Each entry is a plist with `:id', `:date', `:from', and `:subject' keys.")
                                            (plist-get m :subject))))
                             (puthash d m map) d))
                         msgs)))
-    (when-let* ((sel (fzfa-sync-completing-read
+    (when-let* ((sel (fzfa-completing-read
                       :candidates cands
                       :prompt "mail: "
                       :category 'fzfa-mail))

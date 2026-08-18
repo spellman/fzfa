@@ -4,6 +4,7 @@
 
 ;; Author: James Nguyen <james@jojojames.com>
 ;; Version: 1.0
+;; Package-Requires: ((emacs "29.1"))
 ;; Homepage: https://github.com/jojojames/fzfa
 ;; Assisted-by: Claude:claude-opus-4-7
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -31,6 +32,7 @@
 
 (defun fzfa-hungry--deduplicate-dirs (dirs)
   "Remove duplicates and subdirectory entries from DIRS.
+
 If directory A is a prefix of directory B, B is dropped — A's recursive
 search already covers it.  Exception: B is kept when it is itself a git
 root (contains a .git entry), so rg's gitignore stack starts at B rather
@@ -48,6 +50,7 @@ than inheriting A's.  Git-specific — rg only honors .gitignore, so .hg
 ;;;###autoload
 (defun fzfa-hungry-swiper ()
   "Grep across the parent directories of all file-visiting buffers.
+
 Collects unique parent directories, drops any that are subdirectories of
 another in the set, then streams rg (or grep) output through fzf.
 Selecting a match opens the file and jumps to the line."
@@ -72,17 +75,18 @@ Selecting a match opens the file and jumps to the line."
                            " -Rn '' "
                            dir-args))
              (t (user-error "Neither rg nor grep found in exec-path")))))
-      (when-let* ((r (fzfa-async-completing-read
+      (when-let* ((r (fzfa-completing-read
                       :prompt "hungry swiper: "
                       :command command
                       :directory default-directory
                       :category 'fzfa-grep
                       :group #'fzfa--grep-group)))
-        (fzfa-with-visit (fzfa--grep-jump r))))))
+        (fzfa-visit-grep r)))))
 
 ;;;###autoload
 (defun fzfa-hungry-find ()
   "Find files across the parent directories of all file-visiting buffers.
+
 Collects unique parent directories, drops subdirectories already covered
 by a shallower parent, then streams fd (or find) output through fzf."
   (interactive)
@@ -107,11 +111,11 @@ by a shallower parent, then streams fd (or find) output through fzf."
                            dir-args
                            " -type f"))
              (t (user-error "Neither fd nor find found in exec-path")))))
-      (when-let* ((result (fzfa-async-completing-read
+      (when-let* ((result (fzfa-completing-read
                            :prompt "hungry find: "
                            :command command
                            :directory default-directory)))
-        (fzfa-with-visit (find-file result))))))
+        (fzfa-visit-file result)))))
 
 (provide 'fzfa-hungry)
 ;;; fzfa-hungry.el ends here

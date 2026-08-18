@@ -4,6 +4,7 @@
 
 ;; Author: James Nguyen <james@jojojames.com>
 ;; Version: 1.0
+;; Package-Requires: ((emacs "29.1"))
 ;; Homepage: https://github.com/jojojames/fzfa
 ;; Assisted-by: Claude:claude-opus-4-7
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -24,7 +25,7 @@
 ;;
 ;;   - A display transformer so the user can tell which source each
 ;;     candidate came from (ivy ignores the `group-function'
-;;     completion-metadata key that vertico/icomplete consult).
+;;     completion-metadata key that vertico/icomplete read).
 ;;
 ;;   - A push closure that re-scores async sources against `ivy-text'
 ;;     on each pattern change.  ivy's push model means typing doesn't
@@ -36,19 +37,14 @@
 
 (require 'cl-lib)
 (require 'fzfa)
-(require 'ivy nil t)
 
 (defvar ivy-text)
 (defvar ivy--all-candidates)
 (defvar ivy--old-cands)
-(defvar ivy-re-builders-alist)
 (defvar ivy-last)
-(declare-function ivy-state-caller "ivy")
-(declare-function ivy-state-current "ivy")
-(declare-function ivy-state-dynamic-collection "ivy")
+(declare-function ivy-state-action "ivy" t t)
+(declare-function ivy-state-dynamic-collection "ivy" t t)
 (declare-function ivy-configure "ivy")
-(declare-function ivy--set-candidates "ivy")
-(declare-function ivy--exhibit "ivy")
 (declare-function ivy-call "ivy")
 
 (defface fzfa-ivy-multi-source-label
@@ -59,17 +55,17 @@
 (defun fzfa-ivy--multi-display-transformer (cand)
   "Prepend `[source-name]' to CAND when it carries a fzfa tofu suffix.
 
-Self-gates on `fzfa--multi-active-sources' (bound only inside a
-`fzfa--multi-read' session) so non-fzfa `ivy-completing-read'
+Self-gates on `fzfa--active-sources' (bound only inside a
+`fzfa--read' session) so non-fzfa `ivy-completing-read'
 calls pass through unchanged."
   (let* ((n (length cand))
          (last (and (> n 0) (aref cand (1- n)))))
-    (if (and fzfa--multi-active-sources
+    (if (and fzfa--active-sources
              last
              (>= last fzfa--tofu-base)
-             (< last (+ fzfa--tofu-base (length fzfa--multi-active-sources))))
+             (< last (+ fzfa--tofu-base (length fzfa--active-sources))))
         (let* ((idx (- last fzfa--tofu-base))
-               (name (plist-get (aref fzfa--multi-active-sources idx) :name)))
+               (name (plist-get (aref fzfa--active-sources idx) :name)))
           (concat (propertize (format "[%s] " (or name "?"))
                               'face 'fzfa-ivy-multi-source-label)
                   cand))
@@ -81,26 +77,53 @@ calls pass through unchanged."
 Single-source: `fzfa--session-apply' is let-bound by every `fzfa'
 constructor.
 
-Multi-source: `fzfa--multi-active-sources' is let-bound by
-`fzfa--multi-read'."
+Multi-source: `fzfa--active-sources' is let-bound by
+`fzfa--read'."
   (or (bound-and-true-p fzfa--session-apply)
-      (bound-and-true-p fzfa--multi-active-sources)))
+      (bound-and-true-p fzfa--active-sources)))
+
+(defun fzfa-ivy--current-action-fn ()
+  "Return the function ivy would invoke on the current `ivy-call'.
+
+Returns nil when ivy state is unavailable."
+  (when (bound-and-true-p ivy-last)
+    (ignore-errors
+      (let ((act (ivy-state-action ivy-last)))
+        (cond
+         ((functionp act) act)
+         ((and (consp act) (integerp (car act)))
+          ;; Shape: (IDX (key fn desc) (key fn desc) ...)
+          ;; IDX picks one of the action triples; the fn is the second
+          ;; element of that triple.
+          (nth 1 (nth (car act) act))))))))
 
 (defun fzfa-ivy--call-advice (orig &rest args)
   "`:around' advice on `ivy-call' for `fzfa' sessions.
 
-In `fzfa' sessions, replace `ivy''s identity action with our `:apply'
-dispatch — the source plist's (or constructor's) `:apply' is invoked
-on the current candidate without exiting.  All other sessions pass
+In `fzfa' sessions, replace `ivy''s identity default action with our
+`:apply' dispatch — the source plist's (or constructor's) `:apply' is
+invoked on the current candidate without exiting.  All other sessions
+\(and any non-identity action chosen via `ivy-dispatching-call', like
+the per-source narrow actions that `fzfa--read' installs) pass
 through unchanged via (apply ORIG ARGS)."
   ;; Gated on an active minibuffer so the final `ivy-call' that `ivy-read'
   ;; issues after exit — the call whose return value
   ;; `ivy-completing-read' captures as the selection — passes through
   ;; untouched.  Without that gate, sync sessions return nil and the
   ;; caller's `find-file' / `switch-to-buffer' never runs.
-  (if (and (active-minibuffer-window) (fzfa-ivy--session-p))
-      (fzfa-apply-current)
-    (apply orig args)))
+  ;;
+  ;; Also gated on the current action being the identity default.
+  ;; `ivy-dispatching-call' mutates `ivy-state-action' to point at the
+  ;; chosen action triple before invoking `ivy-call'; if we replaced
+  ;; that with `fzfa-apply-current' the user's selection would be
+  ;; silently dropped — exactly what happens with the per-source narrow
+  ;; actions in `fzfa--read'.
+  (let ((current (fzfa-ivy--current-action-fn)))
+    (if (and (active-minibuffer-window)
+             (fzfa-ivy--session-p)
+             (or (null current) (eq current 'identity)))
+        (fzfa-apply-current)
+      (apply orig args))))
 
 (defun fzfa-ivy--restrict-to-matches-backfill (&rest _)
   "Backfill `ivy--old-cands' from `ivy--all-candidates' in dynamic sessions.
@@ -117,14 +140,15 @@ no-op)."
              (not (equal ivy--old-cands ivy--all-candidates)))
     (setq ivy--old-cands ivy--all-candidates)))
 
+;;;###autoload
 (defun fzfa-ivy-setup ()
   "Wire fzfa's ivy integration into the current session."
   (with-eval-after-load 'ivy
     ;; Register under the `t' fallback caller — `ivy-completing-read'
-    ;; uses `this-command' as the actual caller (ivy.el:2672), so
-    ;; per-fzfa-command registration would be brittle.  The
-    ;; transformer self-gates on `fzfa--multi-active-sources' so
-    ;; non-fzfa-multi sessions pass through unchanged.
+    ;; uses `this-command' as the actual caller, so per-fzfa-command
+    ;; registration would be brittle.  The transformer self-gates on
+    ;; `fzfa--active-sources' so non-fzfa-multi sessions pass
+    ;; through unchanged.
     (ivy-configure t
       :display-transformer-fn #'fzfa-ivy--multi-display-transformer)
     (advice-add 'ivy-restrict-to-matches :before

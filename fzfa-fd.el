@@ -4,6 +4,7 @@
 
 ;; Author: James Nguyen <james@jojojames.com>
 ;; Version: 1.0
+;; Package-Requires: ((emacs "29.1"))
 ;; Homepage: https://github.com/jojojames/fzfa
 ;; Assisted-by: Claude:claude-opus-4-7
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -23,8 +24,9 @@
 
 (require 'fzfa)
 
-(defcustom fzfa-fd-command "fd --no-ignore"
+(defcustom fzfa-fd-command "fd --no-ignore --hidden"
   "Shell command used by `fzfa-fd'.
+
 Run from `default-directory'; stdout lines become file candidates."
   :type 'string
   :group 'fzfa)
@@ -32,10 +34,11 @@ Run from `default-directory'; stdout lines become file candidates."
 ;;;###autoload
 (defun fzfa-fd ()
   "Find a file under `default-directory' using fd.
+
 The command is configurable via `fzfa-fd-command'."
   (interactive)
-  (when-let* ((result (fzfa-async-completing-read :command fzfa-fd-command)))
-    (fzfa-with-visit (find-file result))))
+  (when-let* ((result (fzfa-completing-read :command fzfa-fd-command)))
+    (fzfa-visit-file result)))
 
 (provide 'fzfa-fd)
 ;;; fzfa-fd.el ends here

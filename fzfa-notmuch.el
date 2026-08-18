@@ -4,6 +4,7 @@
 
 ;; Author: James Nguyen <james@jojojames.com>
 ;; Version: 1.0
+;; Package-Requires: ((emacs "29.1"))
 ;; Homepage: https://github.com/jojojames/fzfa
 ;; Assisted-by: Claude:claude-opus-4-7
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -33,11 +34,17 @@
 (defvar embark-keymap-alist)
 (defvar embark-general-map)
 
-(declare-function notmuch-show "notmuch-show" (&optional thread-id))
-(declare-function notmuch-tree "notmuch-tree" (&optional query))
+(declare-function notmuch-show "notmuch-show"
+                  (thread-id &optional elide-toggle parent-buffer
+                             query-context buffer-name))
+(declare-function notmuch-tree "notmuch-tree"
+                  (&optional query query-context target buffer-name
+                             open-target unthreaded parent-buffer
+                             oldest-first hide-excluded))
 
 (defcustom fzfa-notmuch-default-query "tag:inbox"
   "Default notmuch query offered at the `fzfa-notmuch' prompt.
+
 Anything notmuch's CLI accepts is valid (e.g. \"tag:unread\",
 \"from:alice and date:1week..\")."
   :type 'string
@@ -46,6 +53,7 @@ Anything notmuch's CLI accepts is valid (e.g. \"tag:unread\",
 (defcustom fzfa-notmuch-search-args
   '("--format=text" "--output=summary" "--sort=newest-first")
   "Arguments inserted between `notmuch search' and the user query.
+
 Each element is shell-quoted before being joined into the command."
   :type '(repeat string)
   :group 'fzfa)
@@ -64,6 +72,7 @@ Each element is shell-quoted before being joined into the command."
 
 (defun fzfa-notmuch--query-candidates ()
   "Candidates for the query completing-read: tags plus saved-search queries.
+
 Tags are formatted as `tag:NAME'.  Saved searches come from
 `notmuch-saved-searches' as-is."
   (let ((tags (ignore-errors
@@ -81,7 +90,7 @@ Tags are formatted as `tag:NAME'.  Saved searches come from
 
 Completes over notmuch tags (as `tag:NAME') and saved-search queries.
 Free-form input is accepted.  Defaults to `fzfa-notmuch-default-query'."
-  (fzfa-sync-completing-read
+  (fzfa-completing-read
    :candidates (fzfa-notmuch--query-candidates)
    :prompt prompt
    :history 'fzfa-notmuch--history
@@ -99,7 +108,7 @@ Free-form input is accepted.  Defaults to `fzfa-notmuch-default-query'."
 
 (defun fzfa-notmuch--select (query prompt)
   "Run notmuch search QUERY and read a selection with PROMPT."
-  (fzfa-async-completing-read
+  (fzfa-completing-read
    :command (fzfa-notmuch--command query)
    :prompt prompt
    :category 'fzfa-notmuch

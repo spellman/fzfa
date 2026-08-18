@@ -4,6 +4,7 @@
 
 ;; Author: James Nguyen <james@jojojames.com>
 ;; Version: 1.0
+;; Package-Requires: ((emacs "29.1"))
 ;; Homepage: https://github.com/jojojames/fzfa
 ;; Assisted-by: Claude:claude-opus-4-7
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -33,6 +34,7 @@
 ;;;###autoload
 (defun fzfa-shell-command (command &optional directory)
   "Fuzzy-search the output of a user-provided shell COMMAND.
+
 Runs in DIRECTORY, defaulting to `default-directory'.
 COMMAND is passed verbatim to `shell-file-name', so pipes,
 redirections, and shell quoting all work as expected.  The selected
@@ -45,7 +47,7 @@ directory; otherwise it is placed in the kill ring."
          (dir (or directory default-directory)))
     (when (string-empty-p cmd)
       (user-error "Command cannot be empty"))
-    (when-let* ((result (fzfa-async-completing-read
+    (when-let* ((result (fzfa-completing-read
                          :prompt (format "%s » " cmd)
                          :command cmd
                          :directory dir
@@ -54,13 +56,14 @@ directory; otherwise it is placed in the kill ring."
                          :skip-executable-check t)))
       (let ((path (expand-file-name result dir)))
         (if (file-exists-p path)
-            (fzfa-with-visit (find-file path))
+            (fzfa-visit-file path)
           (kill-new result)
           (message "%s" result))))))
 
 ;;;###autoload
 (defun fzfa-shell-project-command (command)
   "Fuzzy-search the output of a user-provided shell COMMAND.
+
 Like `fzfa-shell-command' but runs in the project root."
   (interactive
    (list (read-shell-command "Shell command: "
@@ -69,6 +72,7 @@ Like `fzfa-shell-command' but runs in the project root."
 
 (defcustom fzfa-shell-history-file nil
   "Path to a shell history file (bash or zsh).
+
 When nil, defaults to `$HISTFILE' if set, otherwise `~/.zsh_history'."
   :type '(choice (const :tag "Auto ($HISTFILE or ~/.zsh_history)" nil)
                  file)
@@ -77,6 +81,7 @@ When nil, defaults to `$HISTFILE' if set, otherwise `~/.zsh_history'."
 ;;;###autoload
 (defun fzfa-shell-history ()
   "Select a command from the shell history file and insert it at point.
+
 Supports bash and zsh history file formats (including zsh
 `EXTENDED_HISTORY' and bash `HISTTIMEFORMAT' timestamp comments).
 If the current buffer is read-only the selection is copied to the
@@ -119,7 +124,7 @@ kill ring instead.  Override the location via
                           (user-error "Cannot read shell history: %s" file))
                       (or (read-entries file)
                           (user-error "Shell history is empty")))))
-      (when-let* ((result (fzfa-sync-completing-read
+      (when-let* ((result (fzfa-completing-read
                            :candidates cmds :prompt "shell-history: ")))
         (if buffer-read-only
             (progn (kill-new result) (message "Copied: %s" result))

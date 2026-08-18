@@ -29,6 +29,96 @@ jobs:
           repository: jojojames/fzf-native
           path: fzf-native
 
+      # Optional Elisp deps that fzfa forward-declares from.  Checked
+      # out only to give `make check-declare' an Elisp source to
+      # verify the declarations against — `make compile' / `make test'
+      # don't consult them.  Path names match the Makefile defaults
+      # (IVY_DIR=../swiper etc); magit / notmuch / password-store ship
+      # their Elisp in non-root subdirs (lisp / emacs / contrib/emacs).
+      - uses: actions/checkout@v4
+        with:
+          repository: abo-abo/swiper
+          path: swiper
+
+      - uses: actions/checkout@v4
+        with:
+          repository: bbatsov/projectile
+          path: projectile
+
+      - uses: actions/checkout@v4
+        with:
+          repository: minad/vertico
+          path: vertico
+
+      - uses: actions/checkout@v4
+        with:
+          repository: company-mode/company-mode
+          path: company
+
+      - uses: actions/checkout@v4
+        with:
+          repository: oantolin/embark
+          path: embark
+
+      - uses: actions/checkout@v4
+        with:
+          repository: emacs-evil/evil
+          path: evil
+
+      - uses: actions/checkout@v4
+        with:
+          repository: emacs-helm/helm
+          path: helm
+
+      - uses: actions/checkout@v4
+        with:
+          repository: magit/magit
+          path: magit
+
+      # notmuch's upstream is git.notmuchmail.org, but they maintain a
+      # read-only mirror at github.com/notmuch/notmuch.  Mirror has the
+      # Emacs files under `emacs/' (hence NOTMUCH_DIR=../notmuch/emacs
+      # passed to `make check-declare' below — the Makefile default is
+      # the Homebrew site-lisp path, which CI doesn't have).
+      #
+      # Skipped on Windows: the notmuch test corpus contains filenames
+      # with colons (e.g. `test/corpora/default/01:2,'), invalid on
+      # NTFS, so `actions/checkout' aborts.  `check-declare' is skipped
+      # on Windows too — Linux + macOS coverage is sufficient for
+      # forward-declaration verification.
+      - if: runner.os != 'Windows'
+        uses: actions/checkout@v4
+        with:
+          repository: notmuch/notmuch
+          path: notmuch
+
+      - uses: actions/checkout@v4
+        with:
+          repository: zx2c4/password-store
+          path: password-store
+
+      # posframe and ivy-posframe are optional deps for the telescope-style
+      # layout in fzfa-posframe.el.  Same as the others: only used by
+      # `make check-declare' to verify our forward declarations.  Path
+      # names match the Makefile defaults (POSFRAME_DIR=../posframe,
+      # IVY_POSFRAME_DIR=../ivy-posframe).
+      - uses: actions/checkout@v4
+        with:
+          repository: tumashu/posframe
+          path: posframe
+
+      - uses: actions/checkout@v4
+        with:
+          repository: tumashu/ivy-posframe
+          path: ivy-posframe
+
+      # media-thumbnail is optional for video previews; checked out so
+      # `fzfa-media-thumbnail.el' declarations are verified strictly.
+      - uses: actions/checkout@v4
+        with:
+          repository: jojojames/media-thumbnail
+          path: media-thumbnail
+
       - uses: jcs090218/setup-emacs@master
         with:
           version: ${{ matrix.emacs-version }}
@@ -41,6 +131,12 @@ jobs:
         shell: bash
         working-directory: fzf-async
         run: make compile
+
+      - name: Check declarations
+        if: runner.os != 'Windows'
+        shell: bash
+        working-directory: fzf-async
+        run: make check-declare NOTMUCH_DIR=../notmuch/emacs
 
       - name: Test
         shell: bash

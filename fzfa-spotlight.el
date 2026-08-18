@@ -4,6 +4,7 @@
 
 ;; Author: James Nguyen <james@jojojames.com>
 ;; Version: 1.0
+;; Package-Requires: ((emacs "29.1"))
 ;; Homepage: https://github.com/jojojames/fzfa
 ;; Assisted-by: Claude:claude-opus-4-7
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -28,6 +29,7 @@
 (defcustom fzfa-spotlight-audio-directories
   '("~/Music" "~/Downloads" "~/Desktop")
   "Directories searched by `fzfa-spotlight-audio'.
+
 Each directory is passed to `mdfind -onlyin'; results are concatenated.
 Set to nil to search the whole index."
   :type '(repeat directory)
@@ -36,23 +38,25 @@ Set to nil to search the whole index."
 ;;;###autoload
 (defun fzfa-spotlight ()
   "Find a file system-wide using Spotlight (mdfind).
+
 .app bundles are opened with `open'; all other results open with `find-file'."
   (interactive)
-  (when-let* ((result (fzfa-async-completing-read
+  (when-let* ((result (fzfa-completing-read
                        :prompt "spotlight: "
                        :command "mdfind 'kMDItemFSName != \"\"'")))
     (if (string-suffix-p ".app" result)
         (start-process "default-app" nil "open" result)
-      (fzfa-with-visit (find-file result)))))
+      (fzfa-visit-file result))))
 
 ;;;###autoload
 (defun fzfa-spotlight-apps ()
   "Find an installed application using Spotlight.
+
 Opens the selection with `open'."
   (interactive)
   (when-let*
       ((result
-        (fzfa-async-completing-read
+        (fzfa-completing-read
          :prompt "spotlight: "
          :command
          (concat "mdfind 'kMDItemContentTypeTree"
@@ -62,6 +66,7 @@ Opens the selection with `open'."
 ;;;###autoload
 (defun fzfa-spotlight-audio ()
   "Find audio and play it using Spotlight.
+
 Constrained to `fzfa-spotlight-audio-directories'."
   (interactive)
   (let* ((query "'kMDItemContentTypeTree == \"public.audio\"'")
@@ -75,7 +80,7 @@ Constrained to `fzfa-spotlight-audio-directories'."
                fzfa-spotlight-audio-directories
                "; ")
             (concat "mdfind " query))))
-    (when-let* ((result (fzfa-async-completing-read
+    (when-let* ((result (fzfa-completing-read
                          :prompt "spotlight: "
                          :command command)))
       (start-process "default-app" nil "open" result))))

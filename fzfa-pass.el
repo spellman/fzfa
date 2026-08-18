@@ -4,6 +4,7 @@
 
 ;; Author: James Nguyen <james@jojojames.com>
 ;; Version: 1.0
+;; Package-Requires: ((emacs "29.1"))
 ;; Homepage: https://github.com/jojojames/fzfa
 ;; Assisted-by: Claude:claude-opus-4-7
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -51,7 +52,7 @@
   (let ((entries (password-store-list (password-store-dir))))
     (unless entries
       (user-error "No password-store entries found"))
-    (fzfa-sync-completing-read
+    (fzfa-completing-read
      :candidates entries
      :prompt prompt
      :category 'fzfa-pass)))
@@ -59,6 +60,7 @@
 ;;;###autoload
 (defun fzfa-pass-copy (&optional key)
   "Copy the password for KEY to the kill ring.
+
 When KEY is nil (e.g. called interactively), prompt for one."
   (interactive)
   (when-let* ((key (or key (fzfa-pass--read "Copy password: "))))

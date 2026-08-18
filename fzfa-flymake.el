@@ -4,6 +4,7 @@
 
 ;; Author: James Nguyen <james@jojojames.com>
 ;; Version: 1.0
+;; Package-Requires: ((emacs "29.1"))
 ;; Homepage: https://github.com/jojojames/fzfa
 ;; Assisted-by: Claude:claude-opus-4-7
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -23,16 +24,22 @@
 ;;; Code:
 
 (require 'fzfa)
-(require 'flymake)
 (eval-when-compile (require 'cl-lib))
 
 (declare-function project-current "project")
 (declare-function flymake--project-diagnostics "flymake")
 (declare-function flymake--severity "flymake")
 (declare-function flymake--lookup-type-property "flymake")
+(declare-function flymake-diagnostic-buffer "flymake" t t)
+(declare-function flymake-diagnostic-type "flymake" t t)
+(declare-function flymake-diagnostic-beg "flymake" t t)
+(declare-function flymake-diagnostic-text "flymake" t t)
+(declare-function flymake-running-backends "flymake")
+(declare-function flymake-reporting-backends "flymake")
 
 (defun fzfa-flymake--collect (diags)
   "Walk DIAGS and return a list of (BUFFER LINE TYPE TEXT MARKER) tuples.
+
 Diagnostics whose buffer has been killed are dropped."
   (delq nil
         (mapcar
@@ -54,6 +61,7 @@ Diagnostics whose buffer has been killed are dropped."
 
 (defun fzfa-flymake--candidates (diags)
   "Return (CANDIDATES . LOOKUP) for DIAGS.
+
 CANDIDATES is a list of pre-formatted display strings sorted by buffer,
 severity (descending), then position.  LOOKUP is a hash mapping each
 display string to its source-buffer marker."
@@ -99,6 +107,7 @@ display string to its source-buffer marker."
 
 (defun fzfa-flymake--group (lookup)
   "Return a group function partitioning candidates by source buffer.
+
 LOOKUP is the display→marker hash returned by `fzfa-flymake--candidates'."
   (lambda (cand transform)
     (if transform
@@ -110,11 +119,12 @@ LOOKUP is the display→marker hash returned by `fzfa-flymake--candidates'."
 
 (defun fzfa-flymake--read (diags prompt)
   "Prompt for one of DIAGS via fzf and jump to it.
+
 PROMPT is the minibuffer prompt string."
   (let* ((pair (fzfa-flymake--candidates diags))
          (candidates (car pair))
          (lookup (cdr pair)))
-    (when-let* ((result (fzfa-sync-completing-read
+    (when-let* ((result (fzfa-completing-read
                          :candidates candidates
                          :prompt prompt
                          :category 'fzfa-flymake
@@ -139,12 +149,14 @@ PROMPT is the minibuffer prompt string."
 (defun fzfa-flymake ()
   "Jump to a flymake diagnostic in the current buffer."
   (interactive)
+  (require 'flymake)
   (fzfa-flymake--read (flymake-diagnostics) "flymake: "))
 
 ;;;###autoload
 (defun fzfa-flymake-project ()
   "Jump to a flymake diagnostic from any buffer in the current project."
   (interactive)
+  (require 'flymake)
   (let ((pr (or (project-current)
                 (user-error "No current project"))))
     (fzfa-flymake--read (flymake--project-diagnostics pr)

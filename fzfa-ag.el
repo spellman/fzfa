@@ -4,6 +4,7 @@
 
 ;; Author: James Nguyen <james@jojojames.com>
 ;; Version: 1.0
+;; Package-Requires: ((emacs "29.1"))
 ;; Homepage: https://github.com/jojojames/fzfa
 ;; Assisted-by: Claude:claude-opus-4-7
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -26,6 +27,7 @@
 
 (defcustom fzfa-ag-files-command "ag -g ."
   "Shell command used by `fzfa-ag-files'.
+
 Run from `default-directory'; stdout lines become file candidates."
   :type 'string
   :group 'fzfa)
@@ -33,6 +35,7 @@ Run from `default-directory'; stdout lines become file candidates."
 (defcustom fzfa-ag-command
   "ag --nocolor --nogroup --line-number %s \".\""
   "Shell command used by `fzfa-ag' for content search.
+
 A `%s' placeholder is filled with the max-columns flag derived from
 `fzfa-max-line-length'.  Output must be FILE:LINE:CONTENT."
   :type 'string
@@ -41,26 +44,28 @@ A `%s' placeholder is filled with the max-columns flag derived from
 ;;;###autoload
 (defun fzfa-ag-files ()
   "Find a file under `default-directory' using ag.
+
 The command is configurable via `fzfa-ag-files-command'."
   (interactive)
-  (when-let* ((result (fzfa-async-completing-read
+  (when-let* ((result (fzfa-completing-read
                        :prompt "ag files: " :command fzfa-ag-files-command)))
-    (fzfa-with-visit (find-file result))))
+    (fzfa-visit-file result)))
 
 ;;;###autoload
 (defun fzfa-ag ()
   "Search file contents under `default-directory' with ag.
+
 Streams all file contents as FILE:LINE:CONTENT; type to
  fuzzy-filter across them.
 Selecting a candidate opens the file at that line.
 The command is configurable via `fzfa-ag-command'."
   (interactive)
-  (when-let* ((r (fzfa-async-completing-read
+  (when-let* ((r (fzfa-completing-read
                   :command (format fzfa-ag-command
                                    (fzfa--max-columns-flag 'ag))
                   :category 'fzfa-grep
                   :group #'fzfa--grep-group)))
-    (fzfa-with-visit (fzfa--grep-jump r))))
+    (fzfa-visit-grep r)))
 
 (provide 'fzfa-ag)
 ;;; fzfa-ag.el ends here

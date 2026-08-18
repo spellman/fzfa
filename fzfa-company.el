@@ -4,6 +4,7 @@
 
 ;; Author: James Nguyen <james@jojojames.com>
 ;; Version: 1.0
+;; Package-Requires: ((emacs "29.1"))
 ;; Homepage: https://github.com/jojojames/fzfa
 ;; Assisted-by: Claude:claude-opus-4-7
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -43,12 +44,13 @@
 (declare-function company-manual-begin "company")
 (declare-function company-finish       "company")
 (declare-function company-abort        "company")
-(declare-function company-call-backend "company" (command &rest args))
-(declare-function evil-insert-state    "evil-states")
+(declare-function company-call-backend "company" (&rest args))
+(declare-function evil-insert-state    "evil-states" t t)
 (declare-function evil-change-state    "evil-core")
 
 (defvar fzfa-company--source-buffer nil
   "Buffer that originated the current `fzfa-company' session.
+
 Let-bound during the read so the annotation function and embark
 actions can call `company-call-backend' in the buffer where the
 session is alive — `company-backend' is buffer-local and is nil
@@ -106,7 +108,7 @@ original point is restored as well."
           (unless company-candidates
             (user-error "No company candidates available"))
           (let ((fzfa-company--source-buffer (current-buffer)))
-            (let ((selection (fzfa-sync-completing-read
+            (let ((selection (fzfa-completing-read
                               :candidates company-candidates
                               :prompt "Company: "
                               :category 'fzfa-company

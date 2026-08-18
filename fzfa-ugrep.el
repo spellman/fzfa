@@ -4,6 +4,7 @@
 
 ;; Author: James Nguyen <james@jojojames.com>
 ;; Version: 1.0
+;; Package-Requires: ((emacs "29.1"))
 ;; Homepage: https://github.com/jojojames/fzfa
 ;; Assisted-by: Claude:claude-opus-4-7
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -26,6 +27,7 @@
 (defcustom fzfa-ugrep-command
   "ugrep -RIn --no-heading %s ''"
   "Shell command used by `fzfa-ugrep' for content search.
+
 A `%s' placeholder is filled with the max-columns flag derived from
 `fzfa-max-line-length'.  Output must be FILE:LINE:CONTENT."
   :type 'string
@@ -34,18 +36,19 @@ A `%s' placeholder is filled with the max-columns flag derived from
 ;;;###autoload
 (defun fzfa-ugrep ()
   "Search file contents under `default-directory' with ugrep.
+
 Streams all file contents as FILE:LINE:CONTENT; type to
  fuzzy-filter across them.
 
 Selecting a candidate opens the file at that line.
 The command is configurable via `fzfa-ugrep-command'."
   (interactive)
-  (when-let* ((r (fzfa-async-completing-read
+  (when-let* ((r (fzfa-completing-read
                   :command (format fzfa-ugrep-command
                                    (fzfa--max-columns-flag 'ugrep))
                   :category 'fzfa-grep
                   :group #'fzfa--grep-group)))
-    (fzfa-with-visit (fzfa--grep-jump r))))
+    (fzfa-visit-grep r)))
 
 (provide 'fzfa-ugrep)
 ;;; fzfa-ugrep.el ends here

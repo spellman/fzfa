@@ -4,6 +4,7 @@
 
 ;; Author: James Nguyen <james@jojojames.com>
 ;; Version: 1.0
+;; Package-Requires: ((emacs "29.1"))
 ;; Homepage: https://github.com/jojojames/fzfa
 ;; Assisted-by: Claude:claude-opus-4-7
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -17,7 +18,7 @@
 ;; `osascript' (JXA) to dump the Music.app library and to play tracks.
 ;;
 ;; Strategy: dump the entire library once via JXA, present via
-;; `fzfa-sync-completing-read', play the selection by persistent ID.
+;; `fzfa-completing-read', play the selection by persistent ID.
 ;;
 ;; Commands:
 ;;   `fzfa-music'             Flat list of all tracks
@@ -42,6 +43,7 @@
 
 (defconst fzfa-music--dump-script
   "var m = Application('Music');
+
    var t = m.tracks;
    var ids = t.persistentID();
    var ar = t.artist();
@@ -58,6 +60,7 @@
 
 (defvar fzfa-music--cache nil
   "Cached tracks.
+
 Each entry is a plist with `:id', `:artist', `:album', `:name', and
 `:genre' keys.")
 
@@ -66,6 +69,7 @@ Each entry is a plist with `:id', `:artist', `:album', `:name', and
 
 (defconst fzfa-music--playlists-script
   "var m = Application('Music');
+
    var p = m.playlists;
    var ids = p.persistentID();
    var names = p.name();
@@ -78,6 +82,7 @@ Each entry is a plist with `:id', `:artist', `:album', `:name', and
 
 (defvar fzfa-music--items nil
   "Dynamic per-call hash table mapping candidate string -> track plist.
+
 Bound by `fzfa-music--read' so the `:group' callback can look up
 metadata for the candidate currently being rendered.")
 
@@ -130,7 +135,8 @@ metadata for the candidate currently being rendered.")
               (fzfa-music--dump-playlists)))))
 
 (defun fzfa-music--read (tracks group-key prompt)
-  "Read TRACKS via `fzfa-sync-completing-read'; return the chosen plist.
+  "Read TRACKS via `fzfa-completing-read'; return the chosen plist.
+
 PROMPT is shown in the minibuffer.
 GROUP-KEY is one of nil, `:artist', or `:genre'.  When non-nil:
 - TRACKS are sorted by GROUP-KEY so consecutive same-key entries cluster.
@@ -180,7 +186,7 @@ GROUP-KEY is one of nil, `:artist', or `:genre'.  When non-nil:
                   (format "%s — %s"
                           (plist-get p :album) (plist-get p :name)))
                  (t cand)))))))
-    (when-let* ((sel (fzfa-sync-completing-read
+    (when-let* ((sel (fzfa-completing-read
                       :candidates cands
                       :prompt prompt
                       :category 'fzfa-music
@@ -214,7 +220,7 @@ GROUP-KEY is one of nil, `:artist', or `:genre'.  When non-nil:
                           (let ((n (plist-get p :name)))
                             (puthash n p map) n))
                         playlists)))
-    (when-let* ((sel (fzfa-sync-completing-read
+    (when-let* ((sel (fzfa-completing-read
                       :candidates cands
                       :prompt prompt
                       :category 'fzfa-music)))
@@ -235,6 +241,7 @@ GROUP-KEY is one of nil, `:artist', or `:genre'.  When non-nil:
 ;;;###autoload
 (defun fzfa-music-playlist ()
   "Fuzzy-select a Music.app playlist and play it sequentially.
+
 Explicitly disables shuffle so this command always plays in order,
 even if `fzfa-music-playlist-shuffle' was used previously."
   (interactive)
@@ -263,6 +270,7 @@ even if `fzfa-music-playlist-shuffle' was used previously."
 ;;;###autoload
 (defun fzfa-music-by-genre ()
   "Fuzzy-select and play a track, with results grouped by genre.
+
 Genre is prefixed to each candidate, so typing the genre narrows results."
   (interactive)
   (fzfa-music--pick-and-play :genre "music (by genre): "))
