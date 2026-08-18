@@ -23,14 +23,14 @@
 ;;   `fzfa-project-find-dir'       Open a directory in the current project
 ;;   `fzfa-project-buffer'         Switch to a buffer of the current project
 ;;   `fzfa-project-recentf'        Open a recent file from the current project
-;;   `fzfa-project-switch-project' Switch to a known project root
+;;   `fzfa-project-switch-project' Switch to a project root on disk
 ;;
 ;; File-search and grep commands shipped in sibling extensions
 ;; (e.g. `fzfa-rg', `fzfa-fd', `fzfa-find', `fzfa-git-ls-files') already
 ;; honor the project root via `fzfa-project-backend' / `fzfa--default-dir'.
 ;; This extension covers operations that are project-aware in a way the
 ;; shell-driven commands are not: candidate sets derived from
-;; `project-files', `project-buffers', and `project-known-project-roots'.
+;; `project-files', `project-buffers', and `fzfa-project-roots-dirs'.
 
 ;;; Code:
 
@@ -41,9 +41,18 @@
 (declare-function project-root "project")
 (declare-function project-files "project")
 (declare-function project-buffers "project")
-(declare-function project-known-project-roots "project")
 (declare-function project-switch-project "project")
 (defvar recentf-list)
+
+(defcustom fzfa-project-roots-dirs (list (expand-file-name "~/Projects/"))
+  "Directories whose immediate children are project roots.
+
+`fzfa-project-switch-project' lists depth-1 subdirectories of each
+entry instead of consulting `project-known-project-roots', so a
+project shows up as soon as it exists on disk rather than after it
+has been visited once."
+  :type '(repeat directory)
+  :group 'fzfa)
 
 (defun fzfa-project--current ()
   "Return the current project, or signal a user-error."
@@ -146,17 +155,32 @@ current project's root."
                       :category 'fzfa-file)))
       (fzfa-visit-file (expand-file-name sel root)))))
 
+(defun fzfa-project--discover-roots ()
+  "Return depth-1 subdirectories of each dir in `fzfa-project-roots-dirs'."
+  (cl-loop for parent in fzfa-project-roots-dirs
+           when (file-directory-p parent)
+           nconc (cl-loop for entry in (directory-files parent t)
+                          when (and (file-directory-p entry)
+                                    (not (member (file-name-nondirectory entry)
+                                                 '("." ".."))))
+                          collect (file-name-as-directory entry))))
+
 ;;;###autoload
 (defun fzfa-project-switch-project ()
-  "Switch to a known project root via fzf.
+  "Switch to a project root via fzf.
 
-After selection, dispatches through `project-switch-project' so the
-user's `project-switch-commands' menu kicks in."
+Candidates are the immediate subdirectories of each directory in
+`fzfa-project-roots-dirs' — every project on disk, not only the ones
+`project-known-project-roots' has recorded.  After selection,
+dispatches through `project-switch-project' so the user's
+`project-switch-commands' menu kicks in."
   (interactive)
   (require 'project)
-  (let ((roots (project-known-project-roots)))
+  (let ((roots (fzfa-project--discover-roots)))
     (unless roots
-      (user-error "No known projects"))
+      (user-error "No projects found under %s"
+                  (mapconcat #'abbreviate-file-name
+                             fzfa-project-roots-dirs ", ")))
     (when-let* ((sel (fzfa-completing-read
                       :candidates (mapcar #'abbreviate-file-name roots)
                       :prompt "switch project: "
