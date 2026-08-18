@@ -1428,9 +1428,13 @@ We can view media thumbnails inside ~dired~ inside the preview like so:
 | ~fzfa-preview-key~             | ~C-c C-p~                | Key bound to ~fzfa-preview-current~ in fzfa sessions (nil disables).          |
 | ~fzfa-preview-functions~       | (buffer, file, grep, …)  | Category → preview handler plist (see note below).                            |
 | ~fzfa-preview-file-size-limit~ | 1 MiB                    | Skip file preview when the file exceeds this size (nil/0 disables; see note). |
+| ~fzfa-preview-highlight~       | ~t~                      | Highlight the matched line and matches in grep-style previews (see note).     |
+| ~fzfa-preview-cursor~          | ~box~                    | Cursor on the previewed line in grep-style previews; nil leaves it alone.     |
 | ~fzfa-directory~               | ~nil~                    | Per-call directory override; supersedes project backend (see note below).     |
 | ~fzfa-project-backend~         | ~project~                | How to resolve the root directory (see note below).                           |
 | ~fzfa-highlight~               | 200                      | C-side match highlighting; nil/t/N (see note below).                          |
+| ~fzfa-batch-highlight~         | 200                      | Sync-path counterpart of ~fzfa-highlight~ (see note below).                   |
+| ~fzfa-match-highlight~         | ~global~                 | Recolor minibuffer matches to ~fzfa-match~ for contrast (see note).           |
 | ~fzfa-max-line-length~         | 256                      | Per-line character limit; nil/+N/-N (see note below).                         |
 | ~fzfa-cache-size~              | 40                       | Per-session LRU cache entries (see note below).                               |
 | ~fzfa-case-mode~               | ~smart~                  | Case sensitivity: ~smart~ / ~ignore~ / ~respect~.                             |
@@ -1469,11 +1473,12 @@ Only ~:preview~ is required.  Most commands wire up preview
 automatically by declaring a ~:category~ that's in this alist — no
 per-command code needed.  Built-in defaults:
 
-| Category      | Behavior                                                                                |
-|---------------+-----------------------------------------------------------------------------------------|
-| ~fzfa-buffer~ | Show the buffer in a side window without stealing focus.                                |
-| ~fzfa-file~   | Open the file in a side window; kill on abort if not previously loaded (see note).      |
-| ~fzfa-grep~   | Parse ~FILE:LINE:CONTENT~, open FILE at LINE in a side window.                          |
+| Category        | Behavior                                                                                   |
+|-----------------+--------------------------------------------------------------------------------------------|
+| ~fzfa-buffer~   | Show the buffer in a side window without stealing focus.                                   |
+| ~fzfa-file~     | Open the file in a side window; kill on abort if not previously loaded (see note).         |
+| ~fzfa-grep~     | Parse ~FILE:LINE:CONTENT~, open FILE at LINE in a side window, highlighting the match.     |
+| ~fzfa-location~ | Open the SOURCE (file or buffer) carried on the candidate at LINE, highlighting the match. |
 
 For previews, ~fzfa-file~ tracks which buffers it newly created vs.
 which were already loaded.  On abort, only the newly-created ones
@@ -1485,6 +1490,29 @@ caller's ~find-file~ reuses it instead of re-reading from disk.
 Files larger than ~fzfa-preview-file-size-limit~ (default 1 MiB)
 are skipped silently so that landing on a big binary doesn't stall
 selection movement.
+
+Line-oriented previews highlight the match the way ~consult-ripgrep~
+does.  This covers the ~fzfa-grep~ category (used by ~fzfa-rg~,
+~fzfa-ag~, ~fzfa-grep~, ~fzfa-ugrep~, git/hg grep, …) and the
+~fzfa-location~ category (in-Emacs line search — ~fzfa-swiper~,
+~fzfa-swiper-all~, ~fzfa-mark~, ~fzfa-global-mark~, ~fzfa-outline~): a
+full-width ~fzfa-preview-line~ overlay marks the previewed line,
+~fzfa-preview-match~ overlays mark the columns fzf scored against (read
+from the candidate's own ~completions-common-part~ faces, so they line up
+with the highlights the minibuffer already shows), and point lands on the
+first match.  Because the preview window is never the selected window, its
+cursor would otherwise render as a dim hollow box; ~fzfa-preview-cursor~
+(default ~box~) is applied buffer-locally to
+~cursor-in-non-selected-windows~ for the duration of the preview so the
+matched line carries a solid cursor.  All overlays and the cursor override
+are torn down when the selection moves and when the minibuffer closes, so
+the buffer you ultimately visit is left clean.  Set
+~fzfa-preview-highlight~ to ~nil~ to preview without the line/match
+overlays, or ~fzfa-preview-cursor~ to ~nil~ to leave the cursor alone.
+
+The preview also refreshes when only the match highlight changes: as the
+query lengthens the selected line's text stays the same while its matched
+run grows, and the preview overlays follow it.
 
 Categories whose candidates carry auxiliary state (e.g. an in-memory
 lookup hash table — ~fzfa-imenu~, ~fzfa-evil-mark~, ~fzfa-evil-jump~,
@@ -1532,6 +1560,28 @@ The defcustom accepts three forms:
 Setting a cap rather than always highlighting all candidates is intentional:
 ~fzf_get_positions~ is cheap but not free, and users cannot see more than
 ~20–50 candidates without scrolling.  200 provides comfortable headroom.
+
+~fzfa-batch-highlight~ is the same cap for the synchronous scoring path —
+~fzfa-swiper~, ~fzfa-M-x~, ~fzfa-buffer~ and the other single-pass
+commands — and defaults to the same 200.  Each keystroke re-highlights
+only the top N, so a candidate that drops out of the top N keeps the faces
+the previous, shorter query gave it; set the cap low and a buffer with many
+matches shows some lines highlighted through the whole query and others
+frozen at a prefix of it.  Backspacing to an empty query clears the faces
+outright rather than leaving the last query's highlights on screen.
+
+The minibuffer's match color is the ~completions-common-part~ face, which
+some themes render with low contrast.  ~fzfa-match-highlight~ recolors
+matched runs to the foreground and weight of the ~fzfa-match~ face instead:
+~global~ (the default) installs the recolor via ~minibuffer-setup-hook~, so
+every completion UI that applies ~completions-common-part~ (fussy,
+orderless, flex, …) shows the same match color as fzfa; ~t~ limits it to
+fzfa's own sessions; ~nil~ leaves the face untouched.  ~fzfa-match~
+defaults to the same ~match~ face the preview match overlay
+(~fzfa-preview-match~) inherits, so minibuffer and preview matches share
+the theme's match color.  Only foreground and weight are applied — not the
+background — so a match reads as colored text rather than a filled block
+and the selection highlight shows through.
 
 #+begin_src emacs-lisp :tangle yes
   (setq fzfa-highlight nil)   ; disable entirely

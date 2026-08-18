@@ -709,6 +709,94 @@ when the inner sources arrive without `:narrow'."
     (fzfa-preview-put :a nil)
     (should (null (fzfa-preview-get :a :default)))))
 
+(ert-deftest fzfa-preview-installs-initial-preview ()
+  "Install previews the initial selection without a first command.
+
+Sync commands like `fzfa-buffer' have their candidates ready on open;
+the initial preview is dispatched on a deferred idle tick rather than
+waiting for the user to move or type."
+  (let ((source (generate-new-buffer " *fzfa-preview-initial*"))
+        previews)
+    (unwind-protect
+        (cl-letf (((symbol-function 'minibuffer-selected-window)
+                   (lambda () (selected-window)))
+                  ((symbol-function 'fzfa--frontend-candidate)
+                   (lambda () "candidate"))
+                  ((symbol-function 'run-with-idle-timer)
+                   (lambda (_secs _repeat fn &rest args)
+                     (apply fn args) nil))
+                  ((symbol-function 'fzfa--preview-call)
+                   (lambda (action &rest args)
+                     (when (eq action :preview) (push (cadr args) previews)))))
+          (with-current-buffer source
+            (let ((fzfa--preview-session (list '(:preview ignore)))
+                  (fzfa-preview-delay 0))
+              (fzfa--preview-install nil 0))))
+      (kill-buffer source))
+    (should (equal previews '("candidate")))))
+
+(ert-deftest fzfa-preview-refreshes-on-match-face-change ()
+  "Scheduled preview re-fires when only the candidate's match faces change.
+
+The line text stays the same as the query lengthens (\"emba\" → \"embark\"),
+but the `completions-common-part' run grows; the grep/location previews
+derive their highlight from that run, so a property-blind `equal' would
+freeze the overlay on the partial match.  The scheduler must compare with
+text properties and re-fire."
+  (let ((source (generate-new-buffer " *fzfa-preview-refresh*"))
+        (cands (list (propertize "x.el:1:embark" 'face nil)
+                     (propertize "x.el:1:embark" 'face nil)))
+        previews)
+    (unwind-protect
+        (cl-letf (((symbol-function 'minibuffer-selected-window)
+                   (lambda () (selected-window)))
+                  ((symbol-function 'fzfa--frontend-candidate)
+                   (lambda () (car cands)))
+                  ((symbol-function 'fzfa--preview-call)
+                   (lambda (action &rest args)
+                     (when (eq action :preview) (push (cadr args) previews)))))
+          (put-text-property 7 11 'face 'completions-common-part (nth 0 cands))
+          (put-text-property 7 13 'face 'completions-common-part (nth 1 cands))
+          (with-current-buffer source
+            (let ((fzfa--preview-session (list '(:preview ignore)))
+                  (fzfa-preview-delay 0))
+              (fzfa--preview-install nil 0)
+              (run-hooks 'post-command-hook)
+              (setq cands (cdr cands))
+              (run-hooks 'post-command-hook))))
+      (kill-buffer source))
+    (should (= 2 (length previews)))))
+
+(ert-deftest fzfa-preview-refreshes-on-in-place-match-change ()
+  "Scheduled preview re-fires when the SAME candidate is re-highlighted.
+
+The sync scorer (`fzf-native-score-all', behind `fzfa-swiper') mutates
+candidate strings in place and returns the same objects, so the scheduler
+must compare against a snapshot of the last candidate, not a live
+reference to it — otherwise it compares the object to its own mutated
+self and never refreshes."
+  (let* ((source (generate-new-buffer " *fzfa-preview-inplace*"))
+         (cand (propertize "x.el:1:embark" 'face nil))
+         previews)
+    (unwind-protect
+        (cl-letf (((symbol-function 'minibuffer-selected-window)
+                   (lambda () (selected-window)))
+                  ((symbol-function 'fzfa--frontend-candidate)
+                   (lambda () cand))
+                  ((symbol-function 'fzfa--preview-call)
+                   (lambda (action &rest _)
+                     (when (eq action :preview) (push t previews)))))
+          (put-text-property 7 11 'face 'completions-common-part cand)
+          (with-current-buffer source
+            (let ((fzfa--preview-session (list '(:preview ignore)))
+                  (fzfa-preview-delay 0))
+              (fzfa--preview-install nil 0)
+              (run-hooks 'post-command-hook)
+              (put-text-property 7 13 'face 'completions-common-part cand)
+              (run-hooks 'post-command-hook))))
+      (kill-buffer source))
+    (should (= 2 (length previews)))))
+
 (ert-deftest fzfa-grep-preview-parses-candidate ()
   "Grep preview accepts FILE:LINE:CONTENT and ignores malformed input."
   ;; No-op for nil / wrong shape — must not error.
@@ -718,10 +806,140 @@ when the inner sources arrive without `:narrow'."
   ;; Well-formed candidate to a nonexistent path is a silent no-op.
   (fzfa--grep-preview "no-such-file.xyz:1:irrelevant" nil))
 
+(ert-deftest fzfa-common-part-face-p-recognizes-shapes ()
+  "`fzfa--common-part-face-p' accepts the symbol, a list, or a plist."
+  (should (fzfa--common-part-face-p 'completions-common-part))
+  (should (fzfa--common-part-face-p '(completions-common-part default)))
+  (should-not (fzfa--common-part-face-p nil))
+  (should-not (fzfa--common-part-face-p 'match))
+  (should-not (fzfa--common-part-face-p '(:foreground "red"))))
+
+(ert-deftest fzfa-common-part-runs-maps-to-content-columns ()
+  "`fzfa--common-part-runs' returns faced spans offset by CONTENT-START.
+
+The prefix \"f.clj:5:\" is 8 chars; a highlight on the candidate's
+\":msg\" at chars 8-12 becomes column range 0-4 into the file line."
+  (let ((cand (copy-sequence "f.clj:5::msg foo")))
+    ;;                        0123456789...   (":msg" at 8..12)
+    (put-text-property 8 12 'face 'completions-common-part cand)
+    (should (equal (fzfa--common-part-runs cand 8) '((0 . 4))))
+    ;; A candidate with no highlight yields no runs.
+    (should (null (fzfa--common-part-runs (copy-sequence "f.clj:5:plain") 8)))))
+
+(ert-deftest fzfa-grep-preview-draws-and-tears-down-overlays ()
+  "Grep preview draws line + match overlays and lands point on the match.
+
+A following nil tick (the reset/exit dispatch) removes every overlay
+and restores the buffer's cursor."
+  (let ((tmpfile (make-temp-file "fzfa-grep-preview-test" nil ".txt")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmpfile
+            (insert "first line\nsecond :msg here\nthird line\n"))
+          (cl-letf (((symbol-function 'display-buffer) (lambda (&rest _) nil)))
+            (let* ((content "second :msg here")
+                   (prefix (format "%s:2:" tmpfile))
+                   (cand (copy-sequence (concat prefix content)))
+                   (msg-col (string-search ":msg" content))
+                   (start (+ (length prefix) msg-col)))
+              ;; Highlight ":msg" on the candidate, as fzf would.
+              (put-text-property start (+ start 4)
+                                 'face 'completions-common-part cand)
+              (fzfa--grep-preview cand nil)
+              (let* ((buf (find-buffer-visiting tmpfile)))
+                (should buf)
+                (with-current-buffer buf
+                  ;; Point lands on the first matched column.
+                  (should (= (point)
+                             (+ (line-beginning-position) msg-col)))
+                  ;; Solid cursor applied buffer-locally.
+                  (should (eq cursor-in-non-selected-windows
+                              fzfa-preview-cursor))
+                  ;; A line overlay and a match overlay exist on line 2.
+                  (let ((faces (mapcar (lambda (ov) (overlay-get ov 'face))
+                                       (overlays-in (point-min)
+                                                    (point-max)))))
+                    (should (memq 'fzfa-preview-line faces))
+                    (should (memq 'fzfa-preview-match faces))))
+                ;; Reset tick: overlays gone, cursor restored to default.
+                (fzfa--grep-preview nil nil)
+                (should (null fzfa--preview-overlays))
+                (with-current-buffer buf
+                  (should-not
+                   (local-variable-p 'cursor-in-non-selected-windows))
+                  (should (null (overlays-in (point-min) (point-max)))))
+                (kill-buffer buf)))))
+      (delete-file tmpfile))))
+
+(ert-deftest fzfa-location-preview-draws-and-tears-down-overlays ()
+  "Location preview highlights the matched line of a LINE:CONTENT candidate.
+
+Match columns are mapped past the leading line-number prefix; a nil tick
+removes overlays and restores the buffer's cursor."
+  (let ((buf (generate-new-buffer "fzfa-location-preview-test")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'display-buffer) (lambda (&rest _) nil)))
+          (with-current-buffer buf
+            (insert "first line\nsecond :msg here\nthird line\n"))
+          (let* ((content "second :msg here")
+                 ;; Candidate displays "LINE:CONTENT"; the location is
+                 ;; carried on a text property, as `fzfa-swiper' builds it.
+                 (cand (fzfa--location-candidate
+                        (copy-sequence (concat "2:" content))
+                        (buffer-name buf) 2))
+                 (msg-col (string-search ":msg" content))
+                 (start (+ (length "2:") msg-col)))
+            ;; Highlight ":msg" on the candidate, as fzf would.
+            (put-text-property start (+ start 4)
+                               'face 'completions-common-part cand)
+            (fzfa--location-preview cand nil)
+            (with-current-buffer buf
+              ;; Point lands on the first matched column of line 2.
+              (should (= (point) (+ (line-beginning-position) msg-col)))
+              (should (eq cursor-in-non-selected-windows fzfa-preview-cursor))
+              (let ((faces (mapcar (lambda (ov) (overlay-get ov 'face))
+                                   (overlays-in (point-min) (point-max)))))
+                (should (memq 'fzfa-preview-line faces))
+                (should (memq 'fzfa-preview-match faces))))
+            ;; Reset tick: overlays gone, cursor restored.
+            (fzfa--location-preview nil nil)
+            (should (null fzfa--preview-overlays))
+            (with-current-buffer buf
+              (should-not (local-variable-p 'cursor-in-non-selected-windows))
+              (should (null (overlays-in (point-min) (point-max)))))))
+      (kill-buffer buf))))
+
 (ert-deftest fzfa-buffer-preview-handles-missing-buffer ()
   "Buffer preview is a silent no-op when the named buffer does not exist."
   (fzfa--buffer-preview nil nil)
   (fzfa--buffer-preview "*no-such-buffer*-fzfa-test*" nil))
+
+(ert-deftest fzfa-minibuffer-remaps-match-face-when-enabled ()
+  "Setup recolors `completions-common-part' only when enabled.
+
+The remap is buffer-local, so each fzfa minibuffer recolors matches
+without touching the face anywhere else."
+  ;; t: fzfa--minibuffer-format-reset installs the remap.
+  (with-temp-buffer
+    (let ((fzfa-match-highlight t))
+      (fzfa--minibuffer-format-reset)
+      (should (assq 'completions-common-part face-remapping-alist))))
+  ;; nil: no remap.
+  (with-temp-buffer
+    (let ((fzfa-match-highlight nil))
+      (fzfa--minibuffer-format-reset)
+      (should-not (assq 'completions-common-part face-remapping-alist))))
+  ;; global: fzfa--minibuffer-format-reset does NOT remap (the hook does).
+  (with-temp-buffer
+    (let ((fzfa-match-highlight 'global))
+      (fzfa--minibuffer-format-reset)
+      (should-not (assq 'completions-common-part face-remapping-alist)))))
+
+(ert-deftest fzfa-remap-match-face-installs-remap ()
+  "The shared remap function installs a `completions-common-part' remap."
+  (with-temp-buffer
+    (fzfa--remap-match-face)
+    (should (assq 'completions-common-part face-remapping-alist))))
 
 (ert-deftest fzfa-temporary-files-creates-and-kills ()
   "Opener creates an ephemeral buffer for a new file and kills it on cleanup."
@@ -1437,6 +1655,42 @@ updates snapshot, total, filtered, last-result."
         (should (null (fzfa-source-separator-overlays src)))
         ;; Buffer no longer has #...# prefix.
         (should-not (string-match-p "^#" (buffer-string)))))))
+
+;;; fzfa--clear-match-highlights
+
+(defun fzfa-test--faced-p (cand)
+  "Non-nil when CAND carries a `completions-common-part' face anywhere."
+  (let ((pos 0)
+        (found nil))
+    (while (and (not found) (< pos (length cand)))
+      (when (fzfa--common-part-face-p (get-text-property pos 'face cand))
+        (setq found t))
+      (setq pos (1+ pos)))
+    found))
+
+(ert-deftest fzfa-clear-match-highlights-strips-stale-faces ()
+  "Backspacing to an empty query clears the previous query's match faces.
+
+The sync path does not score an empty query, so faces applied to the
+reused candidate strings would otherwise stay on screen."
+  (let ((cands (list (copy-sequence "alpha match")
+                     (copy-sequence "beta match"))))
+    (dolist (c cands)
+      (put-text-property 0 4 'face 'completions-common-part c))
+    (let ((fzfa--match-highlighted t))
+      (fzfa--clear-match-highlights cands)
+      (should-not (seq-some #'fzfa-test--faced-p cands))
+      ;; Flag reset: a second empty-query pass has nothing to do.
+      (should-not fzfa--match-highlighted))))
+
+(ert-deftest fzfa-clear-match-highlights-skips-before-any-highlight ()
+  "No clear pass runs on the initial, already-clean open."
+  (let ((cands (list (copy-sequence "alpha match"))))
+    (put-text-property 0 4 'face 'completions-common-part (car cands))
+    (let ((fzfa--match-highlighted nil))
+      (fzfa--clear-match-highlights cands)
+      ;; Untouched — the flag says nothing this session applied faces.
+      (should (fzfa-test--faced-p (car cands))))))
 
 ;;; fzfa--sort-by-history
 

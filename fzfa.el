@@ -183,17 +183,66 @@ run of matched bytes via fzf_get_positions."
                  (integer :tag "Top N candidates"))
   :group 'fzfa)
 
-(defcustom fzfa-batch-highlight 25
+(defcustom fzfa-batch-highlight 200
   "Controls C-side match highlighting for the synchronous scoring path.
 
 nil — no highlighting.
 a positive integer N — highlight only the top N candidates.
 
-Sync counterpart to `fzfa-highlight'.  Bridged onto
-`fzf-native-batch-highlight' by `fzfa--bridge-defcustoms' for every
-`fzf-native-score-all' / `fzf-native-score' call fzfa makes."
+Sync counterpart to `fzfa-highlight', and defaults to the same value.
+Bridged onto `fzf-native-batch-highlight' by `fzfa--bridge-defcustoms'
+for every `fzf-native-score-all' / `fzf-native-score' call fzfa makes.
+
+Each keystroke re-highlights only the top N; a candidate that drops
+out of the top N keeps the faces the previous, shorter query gave it.
+Set low, that shows up as a buffer where some lines are highlighted
+through the whole query and others are frozen at a prefix of it, so
+prefer lowering it only if scoring a large sync source feels slow."
   :type '(choice (const   :tag "Disabled" nil)
                  (integer :tag "Top N candidates"))
+  :group 'fzfa)
+
+(defface fzfa-match
+  '((t :inherit match))
+  "Face for minibuffer match highlighting.
+
+When `fzfa-match-highlight' is non-nil, `completions-common-part' is
+buffer-locally remapped to this face's foreground and weight so matches
+stand out.  With the `global' setting the remap covers every minibuffer
+session, giving a consistent match color across fzfa commands, fussy,
+orderless, flex, and any other completion style that applies
+`completions-common-part'.
+
+Defaults to the same `match' face the preview match overlay
+\(`fzfa-preview-match') inherits, so minibuffer and preview matches share
+the theme's match color.  Only this face's foreground and weight are
+applied to a minibuffer match — its background is intentionally dropped,
+so a match shows as colored text rather than a filled block and the
+selection highlight shows through.  Customize it to taste."
+  :group 'fzfa)
+
+(defcustom fzfa-match-highlight 'global
+  "Whether to recolor match highlighting in the minibuffer.
+
+The C scorer faces matched runs with `completions-common-part' (see
+`fzfa-highlight'); some themes render that face with low contrast.
+
+nil      No recoloring; matches display with the theme's
+         `completions-common-part' face unchanged.
+t        Recolor inside fzfa's own minibuffer sessions only.
+         Other completion UIs (e.g. fussy via vanilla \\[execute-extended-command])
+         are unaffected.
+global   Recolor in every minibuffer session, so any completion style
+         that applies `completions-common-part' (fussy, orderless,
+         flex, etc.) shows the same match color as fzfa.  Installed
+         via `minibuffer-setup-hook' during `fzfa-setup'.
+
+In all non-nil cases the remap applies only the foreground and weight
+of `fzfa-match' — not its background — so matches read as colored text
+rather than filled blocks."
+  :type '(choice (const :tag "Off" nil)
+                 (const :tag "fzfa only" t)
+                 (const :tag "All minibuffer sessions" global))
   :group 'fzfa)
 
 (defcustom fzfa-max-line-length 256
@@ -400,6 +449,22 @@ call the closure right after `vertico--exhibit' populates candidates.
 Ties preview firing to actual candidate arrival instead of relying on
 `post-command-hook' — which does not fire while the user is idle
 waiting on a slow async producer.")
+
+(defvar fzfa--preview-overlays nil
+  "Live overlays drawn by the most recent highlighted preview.
+
+Shared by the grep and location preview handlers.  Previews run one at
+a time, so a single global list suffices: each call tears down the
+previous overlays before drawing its own, and minibuffer exit drives a
+final teardown via the handler's nil tick.")
+
+(defvar fzfa--preview-cursor-state nil
+  "Cursor override recorded by the most recent highlighted preview, or nil.
+
+A cons (BUFFER . SAVED) where SAVED is BUFFER's prior buffer-local
+`cursor-in-non-selected-windows', or the symbol `fzfa--unset' when the
+variable was not buffer-local before the preview overrode it.  Read by
+`fzfa--preview-highlight-clear' to restore the buffer's cursor.")
 
 ;; Tofu
 
@@ -1010,6 +1075,46 @@ when `fzfa-preview-key' is nil."
 ;; state that :setup stashed even though the minibuffer is gone.
 ;; Only :preview is required.
 
+(defface fzfa-preview-line
+  '((t :inherit hl-line :extend t))
+  "Face for the matched line in a grep-style `fzfa' preview.
+
+Drawn as a full-width overlay over the previewed line, mirroring the
+line highlight `consult-ripgrep' shows."
+  :group 'fzfa)
+
+(defface fzfa-preview-match
+  '((t :inherit match))
+  "Face for the matched portions within a grep-style `fzfa' preview line.
+
+Applied to the same columns fzf scored the candidate against — the
+spans the minibuffer also highlights with `completions-common-part'."
+  :group 'fzfa)
+
+(defcustom fzfa-preview-highlight t
+  "Whether grep-style previews highlight the matched line and matches.
+
+When non-nil, `fzfa--grep-preview' draws a `fzfa-preview-line' overlay
+over the previewed line and `fzfa-preview-match' overlays over the
+matched columns.  Set to nil to preview with no added highlighting."
+  :type 'boolean
+  :group 'fzfa)
+
+(defcustom fzfa-preview-cursor 'box
+  "Cursor shown on the previewed line in grep-style previews.
+
+The preview window is never selected, so its cursor would otherwise
+render with the dim `cursor-in-non-selected-windows' style (a hollow
+box).  This value is applied buffer-locally to
+`cursor-in-non-selected-windows' for the duration of the preview so the
+matched line carries a solid cursor, mirroring `consult'.  Set to nil to
+leave the non-selected-window cursor untouched."
+  :type '(choice (const :tag "Leave default (hollow)" nil)
+                 (const :tag "Solid box" box)
+                 (const :tag "Bar" bar)
+                 (const :tag "Hollow box" hollow))
+  :group 'fzfa)
+
 (defcustom fzfa-preview-file-size-limit (* 10 1024 1024)
   "Maximum file size in bytes that `fzfa--file-preview' will open.
 
@@ -1234,8 +1339,23 @@ preview only fires via `fzfa-preview-key' / `fzfa-preview-current'."
                 ;; the fzfa session; > 1 means something nested.
                 (when (<= (minibuffer-depth) 1)
                   (when-let* ((cand (fzfa--frontend-candidate)))
-                    (unless (equal cand fzfa--preview-last)
-                      (setq fzfa--preview-last cand)
+                    ;; Refresh when the candidate's match highlight
+                    ;; changes, not just its text.  The grep and location
+                    ;; previews derive their overlays from the candidate's
+                    ;; own `completions-common-part' faces, and those grow
+                    ;; as the query lengthens even while the selection
+                    ;; stays on one line (same text) — so a plain `equal'
+                    ;; would freeze the overlay on a partial match ("emba"
+                    ;; of "embark").  Hence `equal-including-properties'.
+                    ;; And store a COPY: the sync scorer
+                    ;; (`fzf-native-score-all', used by swiper)
+                    ;; re-highlights candidates IN PLACE and hands back the
+                    ;; same string objects, so keeping a reference would
+                    ;; compare the object to its own mutated self and never
+                    ;; see the change.  A snapshot does.
+                    (unless (equal-including-properties
+                             cand fzfa--preview-last)
+                      (setq fzfa--preview-last (copy-sequence cand))
                       (fzfa--preview-call :preview session cand)))))))
     (fzfa-preview-put :origin-window (minibuffer-selected-window))
     (fzfa-preview-put :origin-buffer (window-buffer
@@ -1297,7 +1417,22 @@ preview only fires via `fzfa-preview-key' / `fzfa-preview-current'."
              fzfa--minibuffer-session nil)
        (fzfa--preview-call :preview session nil)
        (fzfa--preview-call :exit session))
-     nil t)))
+     nil t)
+    ;; Preview the initial selection without waiting for the user's first
+    ;; command.  Async sessions get their first preview from
+    ;; `fzfa--frontend-exhibit' once results stream in, but sync candidates
+    ;; are ready immediately and would otherwise sit unpreviewed until the
+    ;; first move or keystroke — e.g. `fzfa-buffer' opens showing no
+    ;; preview at all.  Defer one idle tick so the frontend has computed
+    ;; its candidate list; `run' no-ops when there is no candidate yet (the
+    ;; async case, where the streamed-in results drive the first preview).
+    (when delay
+      (run-with-idle-timer
+       0 nil
+       (lambda ()
+         (when (buffer-live-p mb)
+           (with-current-buffer mb
+             (funcall run))))))))
 
 (defun fzfa--preview-return (cand session)
   "Dispatch :return on SESSION with CAND (nil = aborted)."
@@ -1419,36 +1554,171 @@ Public helper for `:preview' handlers to call."
           (run-hooks 'fzfa-after-preview-hook)))
       win)))
 
+;; Shared match-highlighting for line-oriented previews (grep and
+;; location).  The candidate strings already carry `completions-common-part'
+;; faces at the columns fzf scored against (applied C-side by
+;; `fzf-native-async-candidates' / `fzf-native-score-all', capped by
+;; `fzfa-highlight' / `fzfa-batch-highlight'); these helpers mirror those
+;; onto the previewed line plus a full-line overlay and a solid cursor, à
+;; la `consult-ripgrep'.  A single global overlay/cursor record suffices
+;; because previews run one at a time: each handler clears the previous
+;; draw before its own, and the reset/exit tick (nil candidate) clears
+;; with nothing left drawn.
+
+(defun fzfa--preview-highlight-clear ()
+  "Tear down overlays and the cursor override from the previous preview.
+
+Deletes every overlay in `fzfa--preview-overlays' and restores the
+buffer's `cursor-in-non-selected-windows' recorded in
+`fzfa--preview-cursor-state'.  Idempotent: safe to call when nothing is
+drawn (e.g. on the reset/exit `:preview' tick or in tests)."
+  (mapc #'delete-overlay fzfa--preview-overlays)
+  (setq fzfa--preview-overlays nil)
+  (when fzfa--preview-cursor-state
+    (let ((buf   (car fzfa--preview-cursor-state))
+          (saved (cdr fzfa--preview-cursor-state)))
+      (when (buffer-live-p buf)
+        (with-current-buffer buf
+          (if (eq saved 'fzfa--unset)
+              (kill-local-variable 'cursor-in-non-selected-windows)
+            (setq-local cursor-in-non-selected-windows saved)))))
+    (setq fzfa--preview-cursor-state nil)))
+
+(defun fzfa--common-part-face-p (face)
+  "Non-nil when FACE is, or includes, `completions-common-part'.
+
+FACE is the `face' text-property value off a candidate character: a
+single face symbol, a list of faces, or a property plist."
+  (cond
+   ((null face) nil)
+   ((eq face 'completions-common-part) t)
+   ((listp face) (memq 'completions-common-part face))
+   (t nil)))
+
+(defun fzfa--common-part-runs (cand content-start)
+  "Return CONTENT-relative (START . END) char ranges highlighted in CAND.
+
+Scans CAND from CONTENT-START to its end for maximal runs whose `face'
+text property includes `completions-common-part' — the match highlight
+fzf applied to the candidate.  Each range is relative to CONTENT-START,
+i.e. a column span into the line that CAND's CONTENT field represents."
+  (let ((len (length cand))
+        (pos content-start)
+        (runs nil))
+    (while (< pos len)
+      (let ((next (or (next-single-property-change pos 'face cand len) len)))
+        (when (fzfa--common-part-face-p (get-text-property pos 'face cand))
+          (push (cons (- pos content-start) (- next content-start)) runs))
+        (setq pos next)))
+    (nreverse runs)))
+
+(defun fzfa--preview-draw-match (buf cand content-start line-beg line-end)
+  "Draw the line and match overlays for a preview in BUF.
+
+Adds a full-width `fzfa-preview-line' overlay over LINE-BEG..LINE-END and
+a `fzfa-preview-match' overlay over each matched column, mapping CAND's
+`completions-common-part' runs (offset by CONTENT-START) onto the line.
+Pushes every overlay onto `fzfa--preview-overlays' for later teardown.
+Returns the buffer position of the first match, or nil."
+  (let ((line-ov (make-overlay line-beg
+                               (min (1+ line-end) (point-max))
+                               buf)))
+    (overlay-put line-ov 'face 'fzfa-preview-line)
+    (overlay-put line-ov 'priority -50)
+    (push line-ov fzfa--preview-overlays))
+  (let ((first nil))
+    (dolist (run (fzfa--common-part-runs cand content-start))
+      (let ((beg (min line-end (+ line-beg (car run))))
+            (end (min line-end (+ line-beg (cdr run)))))
+        (when (< beg end)
+          (let ((ov (make-overlay beg end buf)))
+            (overlay-put ov 'face 'fzfa-preview-match)
+            (overlay-put ov 'priority 100)
+            (push ov fzfa--preview-overlays))
+          (unless first
+            (setq first beg)))))
+    first))
+
+(defun fzfa--preview-set-cursor (buf)
+  "Give BUF a solid non-selected-window cursor for the preview.
+
+Records the prior `cursor-in-non-selected-windows' in
+`fzfa--preview-cursor-state' so `fzfa--preview-highlight-clear' can
+restore it, then sets it buffer-locally to `fzfa-preview-cursor'."
+  (with-current-buffer buf
+    (setq fzfa--preview-cursor-state
+          (cons buf (if (local-variable-p 'cursor-in-non-selected-windows)
+                        cursor-in-non-selected-windows
+                      'fzfa--unset)))
+    (setq-local cursor-in-non-selected-windows fzfa-preview-cursor)))
+
+(defun fzfa--preview-at-line (buf cand content-start line)
+  "Preview LINE of BUF, highlighting CAND's matches past CONTENT-START.
+
+LINE is 1-based.  CONTENT-START is the index in CAND where the line
+CONTENT begins (after the LINE: / FILE:LINE: prefix), so a matched column
+in CAND maps to the same column in the buffer line.  Draws the line and
+match overlays (when `fzfa-preview-highlight'), applies the solid cursor
+\(when `fzfa-preview-cursor'), lands point on the first match, and shows
+BUF.  Callers run `fzfa--preview-highlight-clear' before resolving BUF.
+Shared by the grep and location preview handlers."
+  (let ((pos (with-current-buffer buf
+               (save-restriction
+                 (widen)
+                 (save-excursion
+                   (goto-char (point-min))
+                   (forward-line (1- line))
+                   (let ((line-beg (point))
+                         (line-end (line-end-position)))
+                     (or (when fzfa-preview-highlight
+                           (fzfa--preview-draw-match
+                            buf cand content-start line-beg line-end))
+                         line-beg)))))))
+    (when fzfa-preview-cursor
+      (fzfa--preview-set-cursor buf))
+    (fzfa-preview-show buf pos)))
+
 (defun fzfa--grep-preview (cand session)
   "Open the FILE from a FILE:LINE:CONTENT grep CAND at LINE for preview.
 
 Resolves FILE against CAND's source's :directory — the search root
-grep ran under."
+grep ran under.
+
+Highlights the matched line and matches, mirroring `consult-ripgrep':
+draws a `fzfa-preview-line' overlay over the line, `fzfa-preview-match'
+overlays over the columns fzf scored against (read from CAND's own
+`completions-common-part' faces, the same spans the minibuffer shows),
+gives the previewed line a solid cursor, and lands point on the first
+match.  Highlighting and the cursor are gated by `fzfa-preview-highlight'
+and `fzfa-preview-cursor'.  Passing nil tears the highlights down without
+opening anything (the reset/exit tick)."
+  (fzfa--preview-highlight-clear)
   (when (and cand
              (string-match "\\`\\(.+?\\):\\([0-9]+\\):" cand))
     (let* ((file (match-string 1 cand))
            (line (string-to-number (match-string 2 cand)))
+           (content-start (match-end 0))
            (dir  (or (fzfa-candidate-directory cand session)
                      default-directory))
            (path (expand-file-name file dir)))
       (when (file-readable-p path)
-        (let ((buf (fzfa-with-quiet-find-file
-                    (find-file-noselect path 'nowarn))))
-          (with-current-buffer buf
-            (save-restriction
-              (widen)
-              (goto-char (point-min))
-              (forward-line (1- line))))
-          (fzfa-preview-show buf))))))
+        (fzfa--preview-at-line
+         (fzfa-with-quiet-find-file
+           (find-file-noselect path 'nowarn))
+         cand content-start line)))))
 
 (defun fzfa--location-preview (cand _session)
   "Preview SOURCE at LINE for an `fzfa-location' CAND.
 
 Reads `(SOURCE . LINE)' off CAND's `fzfa-location' text property.
 SOURCE is resolved as a file path when `file-readable-p', otherwise as
-a live buffer name.  Computes the line's start position in the source
-buffer and hands off to `fzfa-preview-show'.  No-op when the property
-is missing or the target cannot be resolved."
+a live buffer name.  Highlights the matched line and matches like
+`fzfa--grep-preview' does (CAND displays LINE:CONTENT, so the line-number
+prefix is skipped when mapping matched columns onto the line), gives the
+line a solid cursor, and lands point on the first match.  No-op when the
+property is missing or the target cannot be resolved.  Passing nil tears
+the highlights down (the reset/exit tick)."
+  (fzfa--preview-highlight-clear)
   (when-let* ((loc (and (stringp cand) (> (length cand) 0)
                         (get-text-property 0 'fzfa-location cand)))
               (source (car loc))
@@ -1458,14 +1728,10 @@ is missing or the target cannot be resolved."
                         (fzfa-with-quiet-find-file
                          (find-file-noselect source 'nowarn)))
                        ((get-buffer source)))))
-    (let ((pos (with-current-buffer buf
-                 (save-restriction
-                   (widen)
-                   (save-excursion
-                     (goto-char (point-min))
-                     (forward-line (1- line))
-                     (point))))))
-      (fzfa-preview-show buf pos))))
+    (let ((content-start (if (string-match "\\`[0-9]+:" cand)
+                             (match-end 0)
+                           0)))
+      (fzfa--preview-at-line buf cand content-start line))))
 
 (defun fzfa--buffer-preview (cand _session)
   "Show CAND (a buffer name) in a side window for preview."
@@ -1588,6 +1854,18 @@ reuses it instead of re-loading from disk."
 
 ;;; Completing-read helpers
 
+(defun fzfa--remap-match-face ()
+  "Buffer-locally remap `completions-common-part' to `fzfa-match'.
+
+Applies only foreground and weight — not background — so matches read
+as colored text and the selection highlight shows through.
+`face-remap-add-relative' is buffer-local and the minibuffer buffer is
+discarded on exit, so no cleanup is needed."
+  (face-remap-add-relative
+   'completions-common-part
+   :foreground (face-attribute 'fzfa-match :foreground nil t)
+   :weight     (face-attribute 'fzfa-match :weight nil t)))
+
 (defun fzfa--minibuffer-format-reset (&optional suppress-format)
   "Set up the active minibuffer for an fzfa session.
 
@@ -1625,6 +1903,11 @@ naturally.  Covers initial entry and backspace-to-empty alike."
   ;; A setq-local wins over the dynamic scope permanently for this
   ;; minibuffer.
   (setq-local completion-styles '(fzfa))
+  ;; Recolor the C scorer's match highlight for this session only.  The
+  ;; `global' setting installs the same remap on `minibuffer-setup-hook'
+  ;; instead, which already covers this minibuffer.
+  (when (eq fzfa-match-highlight t)
+    (fzfa--remap-match-face))
   (fzfa--minibuffer-install-apply-key)
   (fzfa--minibuffer-install-preview-key)
   (when (bound-and-true-p icomplete-mode)
@@ -1970,6 +2253,38 @@ re-sort here would trample the per-source ordering."
          (and (> n 0)
               (>= (aref cand (1- n)) fzfa--tofu-base)))))
 
+(defvar fzfa--match-highlighted nil
+  "Non-nil once the sync scoring path has applied match faces.
+
+Read by `fzfa--clear-match-highlights' so the clear-only pass runs on
+the non-empty -> empty query transition and never on the initial,
+already-clean open.  A single flag is enough: sync sessions run one at
+a time.")
+
+(defun fzfa--clear-match-highlights (candidates)
+  "Strip `completions-common-part' match faces from CANDIDATES, in place.
+
+The sync path skips scoring on an empty query (there is nothing to
+match), so the faces a prior non-empty query applied to the reused
+candidate strings would otherwise persist — backspace all the way back
+and swiper still shows the last query's highlights.
+
+`fzf-native-highlight-all' clears them itself on an empty query, but
+only for the top-N it would have highlighted and in the order it was
+handed; candidates come back in their original (e.g. buffer) order, so
+a capped clear misses matches sitting past the cap.  Bind the cap to t
+for an uncapped clear-only pass over every candidate.
+
+No-op until a query has actually highlighted something, so the cost is
+paid once on backspace-to-empty, never on open."
+  (when (and fzfa--match-highlighted
+             candidates
+             (fboundp 'fzf-native-highlight-all))
+    (setq fzfa--match-highlighted nil)
+    (let ((fzf-native-batch-highlight t))
+      (fzf-native-highlight-all candidates "")))
+  candidates)
+
 (defun fzfa--sort-by-history (completions &optional history-sym)
   "Order COMPLETIONS by score, history recency, then length.
 
@@ -2011,6 +2326,7 @@ Branches dispatched in order:
      ((fzfa--tagged-p (car completions))
       completions)
      ((string-empty-p query)
+      (fzfa--clear-match-highlights completions)
       (if-let* ((hist (and history-sym
                            (fzfa--build-history-hash history-sym))))
           (mapcar
@@ -2029,6 +2345,7 @@ Branches dispatched in order:
                      completions
                      (and history-sym
                           (fzfa--build-history-hash history-sym)))))
+        (setq fzfa--match-highlighted t)
         (when (fboundp 'fzf-native-highlight-all)
           (fzfa--bridge-defcustoms #'fzf-native-highlight-all sorted query))
         sorted)))))
@@ -5094,6 +5411,9 @@ per visible candidate."
 
     (advice-add 'fzf-native-async-start      :around #'fzfa--bridge-defcustoms)
     (advice-add 'fzf-native-async-candidates :around #'fzfa--bridge-defcustoms)
+
+    (when (eq fzfa-match-highlight 'global)
+      (add-hook 'minibuffer-setup-hook #'fzfa--remap-match-face))
 
     (with-eval-after-load 'embark
       (dolist (entry '((fzfa-file     . embark-file-map)
