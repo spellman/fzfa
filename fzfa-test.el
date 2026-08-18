@@ -709,6 +709,66 @@ when the inner sources arrive without `:narrow'."
     (fzfa-preview-put :a nil)
     (should (null (fzfa-preview-get :a :default)))))
 
+(defmacro fzfa-test--with-preview-install (delay &rest body)
+  "Install preview with DELAY in a scratch buffer and run BODY there.
+
+BODY sees two bindings: `installed', the buffer preview was installed
+in, and `calls', an alist of (ACTION . BUFFER) for every dispatched
+preview action, newest first.  The window / candidate / dispatch
+surface `fzfa--preview-install' touches is mocked out so the test
+exercises scheduling alone."
+  (declare (indent 1) (debug t))
+  `(let ((installed (generate-new-buffer " *fzfa-preview-install*"))
+         (calls nil))
+     (unwind-protect
+         (cl-letf (((symbol-function 'minibuffer-selected-window)
+                    (lambda () (selected-window)))
+                   ((symbol-function 'fzfa--frontend-candidate)
+                    (lambda () "candidate"))
+                   ((symbol-function 'fzfa--preview-call)
+                    (lambda (action &rest _args)
+                      (push (cons action (current-buffer)) calls))))
+           (with-current-buffer installed
+             (let ((fzfa--preview-session (list '(:preview ignore))))
+               (fzfa--preview-install nil ,delay)
+               ,@body)))
+       (with-current-buffer installed
+         (when (timerp fzfa--preview-timer)
+           (cancel-timer fzfa--preview-timer)))
+       (kill-buffer installed))))
+
+(ert-deftest fzfa-preview-scheduler-runs-in-installing-buffer ()
+  "Scheduler reads and writes preview state in the buffer it was installed in.
+
+`fzfa--frontend-exhibit' and the idle timer both call the scheduler
+from whatever buffer happens to be current."
+  (let ((elsewhere (generate-new-buffer " *fzfa-preview-elsewhere*")))
+    (unwind-protect
+        (fzfa-test--with-preview-install 0
+          (let ((schedule fzfa--preview-run-fn))
+            (with-current-buffer elsewhere
+              (funcall schedule))
+            (should (equal (assq :preview calls) (cons :preview installed)))))
+      (kill-buffer elsewhere))))
+
+(ert-deftest fzfa-preview-scheduler-debounces-async-arrivals ()
+  "A positive delay defers the preview instead of dispatching inline.
+
+Async results arriving schedule through the same debounce as cursor
+movement, so a stream that reorders its top candidate repeatedly
+previews only what it settles on."
+  (fzfa-test--with-preview-install 0.3
+    (funcall fzfa--preview-run-fn)
+    (should-not (assq :preview calls))
+    (should (timerp fzfa--preview-timer))))
+
+(ert-deftest fzfa-preview-scheduler-absent-without-delay ()
+  "No auto-fire scheduler is installed when preview is manual-only."
+  (let ((fzfa-preview-delay nil))
+    (fzfa-test--with-preview-install nil
+      (should-not fzfa--preview-run-fn)
+      (should-not (local-variable-p 'post-command-hook)))))
+
 (ert-deftest fzfa-grep-preview-parses-candidate ()
   "Grep preview accepts FILE:LINE:CONTENT and ignores malformed input."
   ;; No-op for nil / wrong shape — must not error.
