@@ -74,9 +74,15 @@
   (recentf-mode 1)
   (unless recentf-list
     (user-error "No recent files"))
-  (when-let* ((result (fzfa-completing-read :candidates recentf-list
-                                                :prompt "recent: "
-                                                :category 'fzfa-file)))
+  ;; Copy the list: recentf's own tracking (`recentf-track-opened-file')
+  ;; rewrites `recentf-list' destructively when a file is visited, and
+  ;; `fzfa-apply-key' visits candidates for real without leaving the
+  ;; session.  Sharing structure with recentf would let that mutation
+  ;; reach the candidate list mid-session.
+  (when-let* ((result (fzfa-completing-read :candidates (copy-sequence
+                                                         recentf-list)
+                                            :prompt "recent: "
+                                            :category 'fzfa-file)))
     (fzfa-visit-file result)))
 
 ;;;###autoload
